@@ -149,5 +149,84 @@ ok('realtime yayınına tablolar eklendi', r.rows[0].n >= 13, r.rows[0].n)
 r = await db.query(`select count(*)::int n from pg_tables where schemaname='public' and not rowsecurity`)
 ok('tüm public tablolarda RLS açık', r.rows[0].n === 0)
 
+// --- Web Push: hatırlatma kuyruğu, tekrar engeli, iptal/erteleme, sessiz saatler ---
+const SECRET = 'a'.repeat(48)
+await db.query(`insert into private.config (key, value) values ('dispatch_secret_sha256', encode(extensions.digest($1, 'sha256'), 'hex'))`, [SECRET])
+r = await as(admin, `insert into public.push_subscriptions (endpoint, p256dh, auth) values ('https://push.example/abc', 'p', 'a') returning id`)
+const sub = r.rows?.[0]?.id
+ok('yetkili cihaz push aboneliği kaydeder', !!sub, r.error?.message)
+const unpaired = await newUser()
+r = await as(unpaired, `insert into public.push_subscriptions (endpoint, p256dh, auth) values ('https://push.example/x', 'p', 'a')`)
+ok('yetkisiz cihaz push aboneliği kaydedemez', !!r.error)
+
+const soon = new Date(Date.now() + 59.5 * 60000)
+r = await as(admin, `insert into public.lessons (student_id, instructor_id, course_id, starts_at, ends_at) values ($1,$2,$3,$4,$5) returning id, version`,
+  [st, inst, course, soon.toISOString(), new Date(soon.getTime() + 130 * 60000).toISOString()])
+const pl = r.rows?.[0]
+ok('1 saat sonraki ders oluşturulur', !!pl, r.error?.message)
+await db.query('select private.enqueue_lesson_reminders()')
+await db.query('select private.enqueue_lesson_reminders()')
+r = await db.query(`select count(*)::int n, max(body) body from public.push_deliveries where lesson_id=$1 and kind='lesson_60'`, [pl.id])
+ok('60 dk hatırlatması tam bir kez kuyruğa alınır', r.rows[0].n === 1, r.rows[0].n)
+ok('hatırlatma metni öğrenci, kurs ve saati içerir', /Elif.*Piyano[\s\S]*Ders saati: \d\d\.\d\d–\d\d\.\d\d[\s\S]*1 saat kaldı/.test(r.rows[0].body), r.rows[0].body)
+
+r = await as('anon', `select * from public.claim_push_batch('yanlis-anahtar-yanlis-anahtar-yanlis-anahtar')`)
+ok('yanlış gizli anahtarla gönderim kuyruğu okunamaz', !!r.error)
+r = await as('anon', `select * from public.claim_push_batch($1)`, [SECRET])
+const claimed = r.rows ?? []
+ok('gönderici doğru anahtarla kuyruğu alır', claimed.length === 1 && claimed[0].url === `/ders/${pl.id}`, r.error?.message)
+r = await as('anon', `select * from public.claim_push_batch($1)`, [SECRET])
+ok('alınmış gönderim ikinci kez verilmez', (r.rows ?? []).length === 0)
+await as('anon', `select public.report_push_results($1, $2::jsonb)`, [SECRET, JSON.stringify([{ id: claimed[0]?.delivery_id, ok: true }])])
+r = await db.query(`select status from public.push_deliveries where id=$1`, [claimed[0]?.delivery_id])
+ok('başarılı gönderim "sent" olarak kaydedilir', r.rows[0]?.status === 'sent')
+
+// Ders saati değişirse yeni saate göre yeniden planlanır
+r = await as(admin, `update public.lessons set starts_at = starts_at + interval '20 seconds', ends_at = ends_at + interval '20 seconds' where id=$1 and version=$2 returning version`, [pl.id, pl.version])
+await db.query('select private.enqueue_lesson_reminders()')
+r = await db.query(`select count(*)::int n from public.push_deliveries where lesson_id=$1 and status='pending'`, [pl.id])
+ok('saati değişen ders için yeni hatırlatma oluşur', r.rows[0].n === 1)
+// İptal edilen dersin hatırlatması gönderilmez
+r = await as(admin, `select version from public.lessons where id=$1`, [pl.id])
+r = await as(admin, `select * from public.cancel_lesson($1, $2, 'test')`, [pl.id, r.rows[0].version])
+r = await as('anon', `select * from public.claim_push_batch($1)`, [SECRET])
+ok('iptal edilen dersin hatırlatması gönderilmez', (r.rows ?? []).length === 0)
+r = await db.query(`select count(*)::int n from public.push_deliveries where lesson_id=$1 and status='skipped'`, [pl.id])
+ok('iptal edilen hatırlatma "skipped" olur', r.rows[0].n === 1)
+
+// Uygulama içi bildirim → push; ödeme tutarı push metninde görünmez
+await db.query(`select private.notify(array['admin']::public.app_role[], null, 'yaklasan_odeme', 'Yaklaşan ödeme', 'Elif Kaya: 1.500,00 ₺ – vade 20.10.2026', '/ogrenciler/x', null, true)`)
+r = await db.query(`select body from public.push_deliveries where kind='notification' order by created_at desc limit 1`)
+ok('ödeme bildirimi push metninde tutar gösterilmez', !!r.rows[0] && !/₺|1\.500/.test(r.rows[0].body), r.rows[0]?.body)
+
+// Sessiz saatler: rutin hatırlatma gönderilmez, önemli bildirim gönderilir
+await db.query(`update public.profiles set notification_prefs = notification_prefs || '{"quiet_enabled": true, "quiet_start": "00:00", "quiet_end": "23:59"}' where id=$1`, [admin])
+const soon2 = new Date(Date.now() + 59.5 * 60000 + 3 * 3600000)
+r = await as(admin, `insert into public.lessons (student_id, starts_at, ends_at) values ($1,$2,$3) returning id`, [st2, new Date(Date.now() + 59.6 * 60000).toISOString(), new Date(Date.now() + 120 * 60000).toISOString()])
+await db.query('select private.enqueue_lesson_reminders()')
+r = await db.query(`select count(*)::int n from public.push_deliveries where lesson_id=$1`, [r.rows?.[0]?.id])
+ok('sessiz saatlerde rutin ders hatırlatması gönderilmez', r.rows[0].n === 0)
+await db.query(`select private.notify(array['admin']::public.app_role[], null, 'ders_iptal', 'Ders iptal edildi', 'Can – 20.10.2026 10:00', '/takvim', null, true)`)
+r = await db.query(`select count(*)::int n from public.push_deliveries d join public.notifications n on n.id=d.notification_id where n.type='ders_iptal'`)
+ok('sessiz saatlerde bile ders iptali bildirimi gönderilir', r.rows[0].n >= 1)
+void soon2
+
+// 410 yanıtı → süresi dolmuş abonelik silinir
+r = await as('anon', `select * from public.claim_push_batch($1)`, [SECRET])
+const c2 = r.rows ?? []
+await as('anon', `select public.report_push_results($1, $2::jsonb)`, [SECRET, JSON.stringify(c2.map((x) => ({ id: x.delivery_id, ok: false, status: 410, error: 'Gone' })))])
+r = await db.query(`select count(*)::int n from public.push_subscriptions where id=$1`, [sub])
+ok('süresi dolmuş (410) push aboneliği temizlenir', c2.length > 0 && r.rows[0].n === 0, c2.length)
+
+// Canlı aktiviteler
+r = await as(admin, `select * from public.get_activities(20)`)
+ok('yönetici canlı aktiviteleri görür', (r.rows ?? []).length > 5 && r.rows.some((a) => a.student_name === 'Elif Kaya'), r.error?.message)
+r = await as('anon', `select * from public.get_activities(20)`)
+ok('oturumsuz istek aktiviteleri göremez', !!r.error)
+r = await as(unpaired, `select count(*)::int n from public.get_activities(20)`)
+ok('yetkisiz cihaz aktivite göremez', r.rows?.[0]?.n === 0)
+r = await as(admin, `update public.app_settings set low_credit_threshold = 3 where id = 1 returning id`)
+ok('yönetici ayarları kaydedebilir (audit tetikleyicisi)', r.rows?.length === 1, r.error?.message)
+
 console.log(`\nSonuç: ${pass} başarılı, ${fail} başarısız`)
 process.exit(fail ? 1 : 0)
