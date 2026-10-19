@@ -3,7 +3,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import clsx from 'clsx'
 import {
   Bell, CalendarDays, Home, Menu as MenuIcon, Users, GraduationCap, Wallet, BarChart3, UserCog, Settings,
-  BookOpen, ShieldCheck, LogOut, WifiOff, RefreshCw, Download, Smartphone,
+  BookOpen, ShieldCheck, LogOut, WifiOff, RefreshCw, Download, Smartphone, Radio,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useNotifications, rpc } from '@/lib/api'
@@ -24,12 +24,24 @@ function useUnreadCount() {
 export function AppShell() {
   const { session, profile, can, signOut } = useAuth()
   useRealtimeSync(session?.user.id)
+  const navigate = useNavigate()
   useEffect(() => {
     if (session?.user.id) void rpc('touch_last_seen', {}).catch(() => undefined)
   }, [session?.user.id])
+  // Bildirime dokunulunca açık uygulamada ilgili ekrana git
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return
+    const onMsg = (e: MessageEvent) => {
+      if (e.data?.type === 'NAVIGATE' && typeof e.data.url === 'string') {
+        const u = new URL(e.data.url, window.location.origin)
+        if (u.origin === window.location.origin) navigate(u.pathname + u.search)
+      }
+    }
+    navigator.serviceWorker.addEventListener('message', onMsg)
+    return () => navigator.serviceWorker.removeEventListener('message', onMsg)
+  }, [navigate])
   const unread = useUnreadCount()
   const { needRefresh, applyUpdate, dismiss } = usePwaUpdate()
-  const navigate = useNavigate()
   const loc = useLocation()
 
   const main = [
@@ -39,6 +51,7 @@ export function AppShell() {
     { to: '/bildirimler', label: 'Bildirimler', icon: Bell, badge: unread },
   ]
   const more = [
+    { to: '/aktiviteler', label: 'Canlı Aktiviteler', icon: Radio, show: true },
     { to: '/egitmenler', label: 'Eğitmenler', icon: GraduationCap, show: can.staff },
     { to: '/odemeler', label: 'Ödemeler', icon: Wallet, show: can.payments },
     { to: '/raporlar', label: 'Raporlar', icon: BarChart3, show: can.staff },

@@ -21,6 +21,7 @@ export interface Profile {
   permissions: Permissions
   is_device: boolean
   last_seen_at: string | null
+  notification_prefs: NotificationPrefs
   created_at: string
   updated_at: string
 }
@@ -38,8 +39,49 @@ export interface DeviceInvite {
   used_by: string | null
 }
 
+export interface NotificationPrefs {
+  lesson_60?: boolean
+  lesson_15?: boolean
+  ders_iptal?: boolean
+  ders_degisiklik?: boolean
+  yeni_ogrenci?: boolean
+  dusuk_ders_hakki?: boolean
+  devamsizlik?: boolean
+  yaklasan_odeme?: boolean
+  gecikmis_odeme?: boolean
+  yeni_tahsilat?: boolean
+  quiet_enabled?: boolean
+  quiet_start?: string
+  quiet_end?: string
+}
+
+export interface Activity {
+  id: number
+  created_at: string
+  table_name: string
+  action: 'insert' | 'update' | 'delete'
+  actor_name: string
+  student_id: string | null
+  student_name: string | null
+  summary: Record<string, string | undefined>
+  old_data: Record<string, unknown> | null
+  new_data: Record<string, unknown> | null
+}
+
+export interface PushDelivery {
+  id: string
+  kind: string
+  title: string
+  status: 'pending' | 'claimed' | 'sent' | 'failed' | 'skipped' | 'expired'
+  attempts: number
+  created_at: string
+  sent_at: string | null
+  last_error: string | null
+}
+
 export interface AppSettings {
   id: number
+  notify_rules: NotificationPrefs
   absence_consumes_credit: boolean
   low_credit_threshold: number
   payment_reminder_days: number
@@ -119,6 +161,7 @@ export interface Lesson {
   starts_at: string
   ends_at: string
   status: LessonStatus
+  started_at: string | null
   credit_used: boolean
   rescheduled_from: string | null
   status_reason: string | null

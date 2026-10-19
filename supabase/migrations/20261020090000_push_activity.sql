@@ -463,3 +463,22 @@ grant execute on function public.start_lesson to authenticated;
 
 -- Eğitmenler kendi derslerini başlatabilsin diye guard gerekmiyor (RPC). Realtime yayınına ekle
 alter publication supabase_realtime add table public.push_deliveries;
+
+-- Cihazın kendine test bildirimi göndermesi (gerçek Web Push yolunu uçtan uca dener)
+create or replace function public.send_test_push()
+returns int language plpgsql security definer set search_path = '' as $$
+declare n int;
+begin
+  if not public.is_member() then raise exception 'Yetkiniz yok.' using errcode = '42501'; end if;
+  if (select count(*) from public.notifications where user_id = auth.uid() and type = 'test' and created_at > now() - interval '1 minute') >= 3 then
+    raise exception 'Çok sık test bildirimi gönderildi. Bir dakika bekleyin.' using errcode = 'P0001';
+  end if;
+  insert into public.notifications (user_id, type, title, body, link)
+  values (auth.uid(), 'test', 'Test bildirimi', 'Bildirimler bu cihazda çalışıyor.', '/ayarlar');
+  select count(*) into n from public.push_deliveries d
+  join public.notifications nt on nt.id = d.notification_id
+  where nt.user_id = auth.uid() and nt.type = 'test' and d.created_at > now() - interval '5 seconds';
+  return n;
+end $$;
+revoke execute on function public.send_test_push from public, anon;
+grant execute on function public.send_test_push to authenticated;

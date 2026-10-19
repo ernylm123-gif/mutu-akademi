@@ -26,7 +26,7 @@ export function StudentFormSheet({ open, onClose, student, onSaved, quick }: {
   const { data: courses } = useCourses()
   const { data: instructors } = useInstructors()
   const form = useForm<StudentFormInput, unknown, StudentFormValues>({ resolver: zodResolver(studentSchema), defaultValues: empty })
-  const { register, handleSubmit, formState: { errors }, reset, setValue, control, watch } = form
+  const { register, handleSubmit, formState: { errors, isDirty }, reset, setValue, control, watch } = form
 
   useEffect(() => {
     if (open) reset(student ? toInput(student) : empty)
@@ -56,7 +56,7 @@ export function StudentFormSheet({ open, onClose, student, onSaved, quick }: {
   }
 
   return (
-    <Sheet open={open} onClose={onClose} title={student ? 'Öğrenciyi düzenle' : quick ? 'Hızlı öğrenci ekle' : 'Yeni öğrenci'} wide
+    <Sheet open={open} onClose={onClose} title={student ? 'Öğrenciyi düzenle' : quick ? 'Hızlı öğrenci ekle' : 'Yeni öğrenci'} wide dirty={isDirty && !save.isPending}
       footer={
         <div className="flex gap-2">
           <Button variant="secondary" block onClick={onClose}>Vazgeç</Button>

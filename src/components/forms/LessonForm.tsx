@@ -5,6 +5,7 @@ import { lessonSchema, type LessonFormInput, type LessonFormValues } from '@/lib
 import { useStudents, useInstructors, useCourses, useDbMutation, insertRow, lessonRpc } from '@/lib/api'
 import { addMonths, dateKey, fromIstanbul, isoWeekday, WEEKDAYS } from '@/lib/time'
 import type { Lesson, WeeklySchedule } from '@/types/db'
+import { frequentTimes } from '@/lib/recent'
 import { Button, Field, Input, Select, Sheet, Textarea, Toggle } from '@/components/ui'
 
 export function LessonFormSheet({ open, onClose, defaults }: {
@@ -16,7 +17,7 @@ export function LessonFormSheet({ open, onClose, defaults }: {
   const { data: instructors } = useInstructors()
   const { data: courses } = useCourses()
   const form = useForm<LessonFormInput, unknown, LessonFormValues>({ resolver: zodResolver(lessonSchema) })
-  const { register, handleSubmit, reset, watch, setValue, control, formState: { errors } } = form
+  const { register, handleSubmit, reset, watch, setValue, control, formState: { errors, isDirty } } = form
 
   useEffect(() => {
     if (!open) return
@@ -50,6 +51,7 @@ export function LessonFormSheet({ open, onClose, defaults }: {
     async (v: LessonFormValues) => {
       const st = students?.find((s) => s.id === v.student_id)
       if (v.repeat_weekly) {
+        frequentTimes.add(v.time)
         const sched = await insertRow<WeeklySchedule>('weekly_schedules', {
           student_id: v.student_id,
           instructor_id: v.instructor_id,
@@ -83,9 +85,16 @@ export function LessonFormSheet({ open, onClose, defaults }: {
   )
 
   const activeStudents = students?.filter((s) => s.is_active) ?? []
+  const time = watch('time')
+  const duration = Number(watch('duration_minutes')) || 0
+  const endTime = /^\d{2}:\d{2}$/.test(time ?? '') && duration > 0
+    ? (() => { const [h, m] = time!.split(':').map(Number); const t = h * 60 + m + duration; return `${String(Math.floor(t / 60) % 24).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}` })()
+    : null
+  const times = frequentTimes.get()
+  const course = courses?.find((c) => c.id === student?.course_id)
 
   return (
-    <Sheet open={open} onClose={onClose} title="Yeni ders"
+    <Sheet open={open} onClose={onClose} title="Yeni ders" dirty={isDirty && !save.isPending}
       footer={
         <div className="flex gap-2">
           <Button variant="secondary" block onClick={onClose}>Vazgeç</Button>
@@ -124,6 +133,18 @@ export function LessonFormSheet({ open, onClose, defaults }: {
             <Input type="number" inputMode="numeric" min={10} step={5} {...register('duration_minutes')} />
           </Field>
         </div>
+        {(times.length > 0 || endTime) && (
+          <div className="-mt-2 flex flex-wrap items-center gap-2">
+            {times.map((t) => (
+              <button key={t} type="button" onClick={() => setValue('time', t, { shouldDirty: true })}
+                className={`h-9 rounded-full px-3 text-sm font-semibold ${t === time ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-700 dark:bg-white/10 dark:text-slate-200'}`}>{t}</button>
+            ))}
+            {endTime && <span className="ml-auto text-sm text-slate-500">Bitiş: <b className="text-slate-900 dark:text-white">{endTime}</b></span>}
+          </div>
+        )}
+        {student && (
+          <p className="-mt-1 text-xs text-slate-500">{course ? `${course.name} · ${course.duration_minutes} dk` : 'Kurs atanmamış'}{student.instructor_id ? ' · kayıtlı eğitmen seçildi' : ''}</p>
+        )}
         <Controller control={control} name="repeat_weekly" render={({ field }) => (
           <Toggle checked={field.value} onChange={field.onChange} label="Her hafta tekrarla"
             description={date ? `Her ${WEEKDAYS[isoWeekday(date) - 1]} aynı saatte` : undefined} />

@@ -50,3 +50,12 @@ export function matchesSearch(haystack: (string | null | undefined)[], q: string
 export function telHref(phone: string | null | undefined) {
   return phone ? `tel:${phone.replace(/[^\d+]/g, '')}` : undefined
 }
+
+/** WhatsApp bağlantısı – Türkiye numaralarını uluslararası biçime çevirir (05xx → 905xx) */
+export function waHref(phone: string | null | undefined) {
+  if (!phone) return undefined
+  let d = phone.replace(/\D/g, '')
+  if (d.startsWith('0')) d = '90' + d.slice(1)
+  else if (d.length === 10 && d.startsWith('5')) d = '90' + d
+  return `https://wa.me/${d}`
+}

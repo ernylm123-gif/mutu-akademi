@@ -4,26 +4,27 @@ import { assertOnline, ConflictError, errorMessage } from '@/lib/errors'
 import { useToast } from '@/components/ui/Toast'
 import type {
   AppNotification, AppSettings, AuditLog, Course, InstallmentView, Instructor, LessonWithRelations,
-  Payment, Profile, DeviceInvite, Student, StudentBalance, StudentNote, WeeklySchedule, AttendanceStatus, Lesson,
+  Payment, Profile, DeviceInvite, Student, Activity, PushDelivery, StudentBalance, StudentNote, WeeklySchedule, AttendanceStatus, Lesson,
 } from '@/types/db'
 
 // ---------------------------------------------------------------------------
 // Sorgu anahtarları ve Realtime eşlemesi
 // ---------------------------------------------------------------------------
 export const TABLE_KEYS: Record<string, string[]> = {
-  students: ['students', 'student', 'balances', 'lessons', 'student-lessons', 'reports'],
-  lessons: ['lessons', 'student-lessons', 'students', 'student', 'reports'],
-  attendance: ['lessons', 'student-lessons', 'students', 'student', 'reports'],
-  payments: ['payments', 'installments', 'balances', 'reports'],
-  installments: ['installments', 'balances'],
+  students: ['students', 'student', 'balances', 'lessons', 'lesson', 'student-lessons', 'reports', 'activities'],
+  lessons: ['lessons', 'lesson', 'student-lessons', 'students', 'student', 'reports', 'activities'],
+  attendance: ['lessons', 'lesson', 'student-lessons', 'students', 'student', 'reports', 'activities'],
+  payments: ['payments', 'installments', 'balances', 'reports', 'activities'],
+  installments: ['installments', 'balances', 'activities'],
   notifications: ['notifications'],
-  instructors: ['instructors', 'lessons', 'students'],
-  courses: ['courses', 'students', 'lessons'],
+  instructors: ['instructors', 'lessons', 'lesson', 'students', 'activities'],
+  courses: ['courses', 'students', 'lessons', 'activities'],
   profiles: ['profiles', 'instructors'],
-  weekly_schedules: ['schedules'],
-  student_notes: ['student-notes'],
+  weekly_schedules: ['schedules', 'all-schedules', 'activities'],
+  student_notes: ['student-notes', 'activities'],
   app_settings: ['settings', 'students'],
   device_invites: ['invites'],
+  push_deliveries: ['deliveries'],
 }
 
 const LESSON_SELECT =
@@ -82,6 +83,39 @@ export const useInvites = (enabled = true) =>
     queryFn: () =>
       unwrap<DeviceInvite[]>(
         supabase.from('device_invites').select('id,label,role,permissions,instructor_id,created_by,created_at,expires_at,used_at,used_by').order('created_at', { ascending: false }).limit(50),
+      ),
+  })
+
+export const useLesson = (id: string | undefined) =>
+  useQuery({
+    queryKey: ['lesson', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const row = await unwrap<Record<string, unknown> | null>(supabase.from('lessons').select(LESSON_SELECT).eq('id', id!).maybeSingle())
+      return row ? normalizeLesson(row) : null
+    },
+  })
+
+export const useActivities = (limit = 50, lessonId?: string) =>
+  useQuery({
+    queryKey: ['activities', limit, lessonId ?? null],
+    queryFn: () => unwrap<Activity[]>(supabase.rpc('get_activities', { p_limit: limit, p_lesson: lessonId ?? null })),
+  })
+
+export const useAllSchedules = (enabled = true) =>
+  useQuery({
+    queryKey: ['all-schedules'],
+    enabled,
+    queryFn: () => unwrap<WeeklySchedule[]>(supabase.from('weekly_schedules').select('*').eq('is_active', true)),
+  })
+
+export const useMyDeliveries = (userId: string | undefined) =>
+  useQuery({
+    queryKey: ['deliveries', userId],
+    enabled: !!userId,
+    queryFn: () =>
+      unwrap<PushDelivery[]>(
+        supabase.from('push_deliveries').select('id,kind,title,status,attempts,created_at,sent_at,last_error').eq('user_id', userId!).order('created_at', { ascending: false }).limit(15),
       ),
   })
 
@@ -229,6 +263,7 @@ export const lessonRpc = {
     rpc<Lesson>('cancel_lesson', { p_lesson_id: l.id, p_expected_version: l.version, p_reason: reason ?? null }),
   reschedule: (l: Pick<Lesson, 'id' | 'version'>, newStart: Date, reason?: string | null) =>
     rpc<Lesson>('reschedule_lesson', { p_lesson_id: l.id, p_expected_version: l.version, p_new_start: newStart.toISOString(), p_reason: reason ?? null }),
+  start: (l: Pick<Lesson, 'id' | 'version'>) => rpc<Lesson>('start_lesson', { p_lesson_id: l.id, p_expected_version: l.version }),
   generate: (scheduleId: string, from: string, until: string) =>
     rpc<{ created: number; skipped: number }>('generate_schedule_lessons', { p_schedule_id: scheduleId, p_from: from, p_until: until }),
 }

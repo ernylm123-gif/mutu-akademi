@@ -20,6 +20,10 @@ const UsersPage = lazy(() => import('@/pages/Users').then((m) => ({ default: m.U
 const SettingsPage = lazy(() => import('@/pages/Misc').then((m) => ({ default: m.SettingsPage })))
 const CoursesPage = lazy(() => import('@/pages/Misc').then((m) => ({ default: m.CoursesPage })))
 const AuditPage = lazy(() => import('@/pages/Misc').then((m) => ({ default: m.AuditPage })))
+const LessonDetailPage = lazy(() => import('@/pages/LessonDetail').then((m) => ({ default: m.LessonDetailPage })))
+const ActivitiesPage = lazy(() => import('@/pages/Activities').then((m) => ({ default: m.ActivitiesPage })))
+const ScheduleImportPage = lazy(() => import('@/pages/ScheduleImport').then((m) => ({ default: m.ScheduleImportPage })))
+const NotificationSettingsPage = lazy(() => import('@/pages/Misc').then((m) => ({ default: m.NotificationSettingsPage })))
 const InstallPage = lazy(() => import('@/pages/Misc').then((m) => ({ default: m.InstallPage })))
 
 function Guard({ allow, children }: { allow: boolean; children: ReactNode }) {
@@ -42,6 +46,10 @@ function Protected() {
           <Route path="ogrenciler" element={<StudentsPage />} />
           <Route path="ogrenciler/:id" element={<StudentDetailPage />} />
           <Route path="bildirimler" element={<NotificationsPage />} />
+          <Route path="bildirim-ayarlari" element={<NotificationSettingsPage />} />
+          <Route path="ders/:id" element={<LessonDetailPage />} />
+          <Route path="aktiviteler" element={<ActivitiesPage />} />
+          <Route path="program-yukle" element={<Guard allow={can.lessons}><ScheduleImportPage /></Guard>} />
           <Route path="menu" element={<MenuPage />} />
           <Route path="egitmenler" element={<Guard allow={can.staff}><InstructorsPage /></Guard>} />
           <Route path="egitmenler/:id" element={<Guard allow={can.staff}><InstructorDetailPage /></Guard>} />

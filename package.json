@@ -5,9 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && tsc -p tsconfig.sw.json && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc -b --noEmit",
+    "typecheck": "tsc -b --noEmit && tsc -p tsconfig.sw.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:db": "node tests/db/rls.test.mjs",
@@ -21,12 +21,15 @@
     "clsx": "^2.1.1",
     "date-fns": "^4.4.0",
     "lucide-react": "^1.59.0",
+    "pdfjs-dist": "^6.4.299",
     "pdfmake": "^0.3.12",
     "qrcode": "^1.5.4",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "react-hook-form": "^7.90.0",
     "react-router-dom": "^7.18.4",
+    "read-excel-file": "^9.3.12",
+    "web-push": "^3.6.7",
     "zod": "^4.6.7"
   },
   "devDependencies": {
@@ -42,6 +45,8 @@
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "@types/web-push": "^3.6.4",
+    "@vercel/node": "^24.0.3",
     "@vitejs/plugin-react": "^6.1.2",
     "jsdom": "^29.1.1",
     "supabase": "^2.121.0",
@@ -50,6 +55,8 @@
     "vite": "^8.3.4",
     "vite-plugin-pwa": "^2.0.0",
     "vitest": "^4.1.12",
+    "workbox-precaching": "^7.4.1",
+    "workbox-routing": "^7.4.1",
     "workbox-window": "^7.4.1"
   }
 }

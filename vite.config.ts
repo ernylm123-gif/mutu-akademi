@@ -11,6 +11,9 @@ export default defineConfig({
     react(),
     tailwindcss(),
     VitePWA({
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.ts',
       registerType: 'prompt',
       injectRegister: false,
       includeAssets: ['logo.png', 'icons/*.png'],
@@ -21,9 +24,10 @@ export default defineConfig({
         description: 'Mutu Akademi öğrenci ve ders takip uygulaması',
         lang: 'tr',
         dir: 'ltr',
-        start_url: '/',
+        start_url: '/?kaynak=pwa',
         scope: '/',
         display: 'standalone',
+        display_override: ['standalone'],
         orientation: 'portrait',
         background_color: '#ffffff',
         theme_color: '#ffffff',
@@ -33,15 +37,15 @@ export default defineConfig({
           { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
           { src: '/icons/maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
         ],
+        shortcuts: [
+          { name: 'Bugünkü dersler', short_name: 'Takvim', url: '/takvim', icons: [{ src: '/icons/icon-192.png', sizes: '192x192' }] },
+          { name: 'Öğrenci ekle', short_name: 'Öğrenci', url: '/ogrenciler?yeni=1', icons: [{ src: '/icons/icon-192.png', sizes: '192x192' }] },
+        ],
       },
-      workbox: {
+      injectManifest: {
         globPatterns: ['**/*.{js,css,html,png,svg,woff2}'],
-        globIgnores: ['**/icons/splash-*', '**/assets/pdf-*.js'],
-        navigateFallback: '/index.html',
-        cleanupOutdatedCaches: true,
+        globIgnores: ['**/icons/splash-*', '**/assets/pdf-*.js', '**/assets/import-*.js'],
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
-        // Supabase API yanıtları asla önbelleğe alınmaz: veriler her zaman sunucudan gelir.
-        runtimeCaching: [],
       },
     }),
   ],
@@ -52,6 +56,7 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           if (id.includes('pdfmake')) return 'pdf'
+          if (id.includes('pdfjs-dist') || id.includes('read-excel-file')) return 'import'
           if (id.includes('@supabase')) return 'supabase'
           if (id.includes('react-dom') || id.includes('react-router')) return 'react'
         },

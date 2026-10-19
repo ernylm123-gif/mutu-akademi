@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Sun, Moon, Monitor, BookOpen, Plus, Share, PlusSquare, MoreVertical, Download, CheckCircle2, ShieldCheck } from 'lucide-react'
@@ -12,6 +13,7 @@ import { formatMoney } from '@/lib/format'
 import type { Course } from '@/types/db'
 import { Badge, Button, Card, EmptyState, Field, Input, PageLoader, SectionTitle, Sheet, Textarea, Toggle } from '@/components/ui'
 import { PageHeader } from '@/components/layout/AppShell'
+import { NotificationSettings } from '@/components/NotificationSettings'
 
 // ---------------------------------------------------------------------------
 // Ayarlar
@@ -56,6 +58,8 @@ export function SettingsPage() {
           </button>
         ))}
       </div>
+      <SectionTitle>Bildirimler</SectionTitle>
+      <Link to="/bildirim-ayarlari" className="card flex min-h-[56px] items-center justify-between px-4 font-semibold">Bildirim ayarları ve ders hatırlatmaları<span className="text-slate-400">›</span></Link>
       <SectionTitle>Profil</SectionTitle>
       <Card className="grid gap-4 p-4">
         <Field label="Ad soyad"><Input value={name} onChange={(e) => setName(e.target.value)} /></Field>
@@ -242,6 +246,15 @@ export function InstallPage() {
         <ShieldCheck className="size-5 shrink-0 text-brand-600" />
         <p>Uygulama adresini herkes açabilir, ancak öğrenci ve ders verilerini yalnızca yönetici tarafından davet koduyla yetkilendirilmiş cihazlar görebilir. Yetkilendirilmiş cihaz her açılışta şifre sormadan doğrudan ana panele girer. Yeni sürüm yayınlandığında uygulama otomatik olarak güncellenir.</p>
       </Card>
+    </div>
+  )
+}
+
+export function NotificationSettingsPage() {
+  return (
+    <div className="mx-auto max-w-3xl">
+      <PageHeader back title="Bildirim ayarları" subtitle="Ders hatırlatmaları ve anlık bildirimler" />
+      <NotificationSettings />
     </div>
   )
 }

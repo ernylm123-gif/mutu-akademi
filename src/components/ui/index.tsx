@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react'
+import { forwardRef, useEffect, useRef, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react'
 import { createPortal } from 'react-dom'
 import clsx from 'clsx'
 import { Loader2, X } from 'lucide-react'
@@ -215,31 +215,69 @@ export function Segmented<T extends string>({ value, onChange, options }: { valu
 // ---------------------------------------------------------------------------
 // Sheet / Modal (mobilde alttan açılan panel, masaüstünde ortalanmış pencere)
 // ---------------------------------------------------------------------------
-export function Sheet({ open, onClose, title, children, footer, wide }: { open: boolean; onClose: () => void; title: string; children: ReactNode; footer?: ReactNode; wide?: boolean }) {
+const DIRTY_MSG = 'Kaydedilmemiş değişiklikler var. Çıkmak istediğinize emin misiniz?'
+
+export function Sheet({ open, onClose, title, children, footer, wide, dirty }: { open: boolean; onClose: () => void; title: string; children: ReactNode; footer?: ReactNode; wide?: boolean; dirty?: boolean }) {
+  const onCloseRef = useRef(onClose)
+  const dirtyRef = useRef(dirty)
+  onCloseRef.current = onClose
+  dirtyRef.current = dirty
+
+  const requestClose = () => {
+    if (dirtyRef.current && !window.confirm(DIRTY_MSG)) return
+    onCloseRef.current()
+  }
+
   useEffect(() => {
     if (!open) return
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    // Android geri tuşu / tarayıcı geri hareketi paneli kapatsın
+    const id = Math.random().toString(36).slice(2)
+    let closing = false
+    window.history.pushState({ ...(window.history.state ?? {}), mutuSheet: id }, '')
+    const onPop = () => {
+      if (closing) return
+      if (dirtyRef.current && !window.confirm(DIRTY_MSG)) {
+        window.history.pushState({ ...(window.history.state ?? {}), mutuSheet: id }, '')
+        return
+      }
+      closing = true
+      onCloseRef.current()
+    }
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && requestClose()
+    window.addEventListener('popstate', onPop)
     document.addEventListener('keydown', onKey)
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     return () => {
+      window.removeEventListener('popstate', onPop)
       document.removeEventListener('keydown', onKey)
       document.body.style.overflow = prev
+      if (!closing && window.history.state?.mutuSheet === id) window.history.back()
     }
-  }, [open, onClose])
+  }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
+
   if (!open) return null
   return createPortal(
     <div className="fixed inset-0 z-[60] flex items-end justify-center sm:items-center sm:p-6" role="dialog" aria-modal="true" aria-label={title}>
-      <div className="fade-in absolute inset-0 bg-slate-950/40 backdrop-blur-[2px]" onClick={onClose} />
+      <div className="fade-in absolute inset-0 bg-slate-950/40 backdrop-blur-[2px]" onClick={requestClose} />
       <div className={clsx('slide-up relative flex max-h-[92dvh] w-full flex-col rounded-t-3xl bg-white shadow-2xl dark:bg-[#121821] sm:rounded-3xl', wide ? 'sm:max-w-2xl' : 'sm:max-w-lg')}>
         <div className="mx-auto mt-2 h-1.5 w-10 rounded-full bg-slate-200 sm:hidden dark:bg-white/20" />
         <div className="flex items-center justify-between gap-3 px-5 pb-2 pt-3 sm:pt-5">
           <h3 className="text-lg font-bold">{title}</h3>
-          <button onClick={onClose} className="grid size-9 place-items-center rounded-full text-slate-500 hover:bg-slate-100 dark:hover:bg-white/10" aria-label="Kapat">
+          <button onClick={requestClose} className="grid size-11 place-items-center rounded-full text-slate-500 hover:bg-slate-100 dark:hover:bg-white/10" aria-label="Kapat">
             <X className="size-5" />
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto px-5 pb-4">{children}</div>
+        <div
+          className="flex-1 overflow-y-auto overscroll-contain px-5 pb-4"
+          onFocus={(e) => {
+            // iOS/Android: klavye açılınca odaktaki alanı görünür tut
+            const el = e.target as HTMLElement
+            if (el.matches('input, textarea, select')) setTimeout(() => el.scrollIntoView({ block: 'center', behavior: 'smooth' }), 300)
+          }}
+        >
+          {children}
+        </div>
         {footer && <div className="safe-bottom border-t border-slate-100 px-5 py-3 dark:border-white/10">{footer}</div>}
       </div>
     </div>,

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Wallet, AlertTriangle, CalendarClock, TrendingUp, Plus } from 'lucide-react'
 import { useBalances, useInstallments, usePayments, useStudents } from '@/lib/api'
 import { addDays, dateKey, formatDate } from '@/lib/time'
@@ -15,7 +15,8 @@ export function PaymentsPage() {
   const instQ = useInstallments()
   const payQ = usePayments()
   const [tab, setTab] = useState<'borclu' | 'vade' | 'gecmis'>('borclu')
-  const [pick, setPick] = useState(false)
+  const [params] = useSearchParams()
+  const [pick, setPick] = useState(params.get('yeni') === '1')
   const [search, setSearch] = useState('')
   const [payFor, setPayFor] = useState<{ id: string; name: string } | null>(null)
 

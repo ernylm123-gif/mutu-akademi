@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { recentStudents } from '@/lib/recent'
 import { Search, UserPlus, Users, ChevronRight } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useStudents, useInstructors, useCourses, useBalances } from '@/lib/api'
@@ -18,7 +19,8 @@ export function StudentsPage() {
   const [q, setQ] = useState('')
   const [filter, setFilter] = useState<'aktif' | 'pasif' | 'hepsi'>('aktif')
   const [instructor, setInstructor] = useState('')
-  const [adding, setAdding] = useState(false)
+  const [params, setParams] = useSearchParams()
+  const [adding, setAdding] = useState(params.get('yeni') === '1')
 
   const list = useMemo(() => {
     return (data ?? []).filter((s) =>
@@ -54,6 +56,21 @@ export function StudentsPage() {
         </div>
       </div>
 
+      {!q && (() => {
+        const recent = recentStudents.get().map((rid) => data?.find((s) => s.id === rid)).filter(Boolean).slice(0, 6)
+        return recent.length > 0 ? (
+          <div className="mb-4">
+            <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Son görüntülenenler</p>
+            <div className="flex gap-2 overflow-x-auto pb-1">
+              {recent.map((s) => (
+                <button key={s!.id} onClick={() => navigate(`/ogrenciler/${s!.id}`)} className="card flex h-11 shrink-0 items-center gap-2 px-3 text-sm font-semibold">
+                  <Avatar name={s!.full_name} color={instructors?.find((i) => i.id === s!.instructor_id)?.color} size={26} />{s!.full_name}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null
+      })()}
       {list.length === 0 ? (
         <Card>
           <EmptyState icon={<Users className="size-6" />} title={q ? 'Sonuç bulunamadı' : 'Henüz öğrenci yok'} text={q ? 'Farklı bir arama deneyin.' : 'İlk öğrencinizi ekleyerek başlayın.'}
@@ -91,7 +108,7 @@ export function StudentsPage() {
           })}
         </div>
       )}
-      <StudentFormSheet open={adding} onClose={() => setAdding(false)} onSaved={(s) => navigate(`/ogrenciler/${s.id}`)} />
+      <StudentFormSheet open={adding} onClose={() => { setAdding(false); if (params.has('yeni')) setParams({}, { replace: true }) }} onSaved={(s) => navigate(`/ogrenciler/${s.id}`)} />
     </div>
   )
 }

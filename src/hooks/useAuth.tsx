@@ -86,6 +86,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [session?.user.id, loadProfile])
 
   const signOut = useCallback(async () => {
+    // Bu cihazın push aboneliğini kaldır (bağlantısı kesilen cihaza bildirim gitmesin)
+    try {
+      const reg = 'serviceWorker' in navigator ? await navigator.serviceWorker.getRegistration() : undefined
+      const sub = await reg?.pushManager?.getSubscription()
+      if (sub) {
+        await supabase.from('push_subscriptions').delete().eq('endpoint', sub.endpoint)
+        await sub.unsubscribe()
+      }
+    } catch { /* yoksay */ }
     await supabase.auth.signOut()
     setProfile(null)
     setInstructorId(null)

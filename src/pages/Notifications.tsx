@@ -1,7 +1,8 @@
 import { useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
+import { usePush } from '@/hooks/usePush'
 import clsx from 'clsx'
-import { Bell, CheckCheck, UserPlus, CalendarClock, Ban, UserX, AlertTriangle, Wallet } from 'lucide-react'
+import { Bell, BellRing, Settings2, CheckCheck, UserPlus, CalendarClock, Ban, UserX, AlertTriangle, Wallet } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useNotifications, useDbMutation, rpc } from '@/lib/api'
 import { supabase } from '@/lib/supabase'
@@ -24,6 +25,7 @@ export function NotificationsPage() {
   const { session, can } = useAuth()
   const navigate = useNavigate()
   const { data, isLoading } = useNotifications(session?.user.id)
+  const push = usePush(session?.user.id)
 
   // Ödeme hatırlatmalarını kontrol et (sunucuda tekrar engellenir)
   useEffect(() => {
@@ -49,7 +51,17 @@ export function NotificationsPage() {
   return (
     <div>
       <PageHeader title="Bildirimler" subtitle={unread ? `${unread} okunmamış` : 'Hepsi okundu'}
-        actions={unread > 0 && <Button variant="secondary" size="sm" icon={<CheckCheck className="size-4" />} loading={markAll.isPending} onClick={() => markAll.mutate(undefined)}>Tümünü okundu yap</Button>} />
+        actions={<>
+          {unread > 0 && <Button variant="secondary" size="sm" icon={<CheckCheck className="size-4" />} loading={markAll.isPending} onClick={() => markAll.mutate(undefined)}>Tümünü okundu yap</Button>}
+          <Link to="/bildirim-ayarlari" className="grid size-11 place-items-center rounded-2xl border border-slate-200 text-slate-600 dark:border-white/10 dark:text-slate-300" aria-label="Bildirim ayarları"><Settings2 className="size-5" /></Link>
+        </>} />
+      {!push.subscribed && (
+        <Link to="/bildirim-ayarlari" className="card mb-4 flex items-center gap-3 p-4">
+          <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-brand-50 text-brand-600 dark:bg-brand-500/15"><BellRing className="size-5" /></span>
+          <span className="flex-1 text-sm"><b className="block">Ders hatırlatmalarını telefona alın</b><span className="text-slate-500">Dersten 1 saat önce, uygulama kapalıyken bile bildirim.</span></span>
+          <span className="text-sm font-semibold text-brand-600">Aç</span>
+        </Link>
+      )}
       {(data ?? []).length === 0 ? (
         <Card><EmptyState icon={<Bell className="size-6" />} title="Bildirim yok" text="Yeni öğrenci, ders değişikliği, devamsızlık ve ödeme bildirimleri burada görünür." /></Card>
       ) : (

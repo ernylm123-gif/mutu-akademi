@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import clsx from 'clsx'
-import { ChevronLeft, ChevronRight, Plus, CalendarDays, Move } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, CalendarDays, Move, Upload, X } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import { DndContext, PointerSensor, TouchSensor, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
 import { useAuth } from '@/hooks/useAuth'
-import { useInstructors, useLessons, useDbMutation, updateVersioned } from '@/lib/api'
+import { useInstructors, useLessons, useDbMutation, updateVersioned, useStudents, useCourses } from '@/lib/api'
 import {
   addDays, addMonths, dateKey, formatDayLong, fromIstanbul, istanbulParts, minutesBetween, monthGrid, MONTHS,
   startOfMonth, startOfWeek, timeHM, WEEKDAYS_SHORT,
@@ -31,6 +32,11 @@ export function CalendarPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [creating, setCreating] = useState<{ date: string; time?: string } | null>(null)
   const { data: instructors } = useInstructors()
+  const { data: students } = useStudents()
+  const { data: courses } = useCourses()
+  const navigate = useNavigate()
+  const [studentF, setStudentF] = useState(params.get('ogrenci') ?? '')
+  const [courseF, setCourseF] = useState('')
 
   const range = useMemo(() => {
     if (view === 'gun') return [cursor, addDays(cursor, 1)]
@@ -40,7 +46,11 @@ export function CalendarPage() {
 
   const filterInstr = can.instructor ? instructorId : instr || null
   const q = useLessons(fromIstanbul(range[0]).toISOString(), fromIstanbul(range[1]).toISOString(), { instructorId: filterInstr })
-  const lessons = q.data ?? []
+  const lessons = useMemo(
+    () => (q.data ?? []).filter((l) => (!studentF || l.student_id === studentF) && (!courseF || l.course_id === courseF)),
+    [q.data, studentF, courseF],
+  )
+  const filtered = !!(instr || studentF || courseF)
   const selected = lessons.find((l) => l.id === selectedId) ?? null
 
   const move = (dir: number) => {
@@ -58,7 +68,10 @@ export function CalendarPage() {
 
   return (
     <div>
-      <PageHeader title="Takvim" actions={can.lessons && <Button icon={<Plus className="size-4" />} onClick={() => setCreating({ date: cursor })}>Ders oluştur</Button>} />
+      <PageHeader title="Takvim" actions={can.lessons && <>
+        <Button variant="secondary" icon={<Upload className="size-4" />} onClick={() => navigate('/program-yukle')}>Program yükle</Button>
+        <Button icon={<Plus className="size-4" />} onClick={() => setCreating({ date: cursor })}>Ders oluştur</Button>
+      </>} />
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <Segmented value={view} onChange={changeView} options={[{ value: 'gun', label: 'Gün' }, { value: 'hafta', label: 'Hafta' }, { value: 'ay', label: 'Ay' }]} />
         <div className="flex items-center gap-1">
@@ -66,11 +79,24 @@ export function CalendarPage() {
           <Button size="sm" variant="secondary" onClick={() => { setCursor(dateKey()); setParams({ tarih: dateKey(), gorunum: view }, { replace: true }) }}>Bugün</Button>
           <Button size="sm" variant="secondary" onClick={() => move(1)} aria-label="Sonraki"><ChevronRight className="size-4" /></Button>
         </div>
+      </div>
+      <div className="-mt-2 mb-4 flex gap-2 overflow-x-auto pb-1">
         {can.staff && (
-          <Select value={instr} onChange={(e) => setInstr(e.target.value)} className="h-9 w-44 text-sm">
+          <Select value={instr} onChange={(e) => setInstr(e.target.value)} className="h-10 w-44 shrink-0 text-sm" aria-label="Eğitmen filtresi">
             <option value="">Tüm eğitmenler</option>
             {instructors?.map((i) => <option key={i.id} value={i.id}>{i.full_name}</option>)}
           </Select>
+        )}
+        <Select value={studentF} onChange={(e) => setStudentF(e.target.value)} className="h-10 w-44 shrink-0 text-sm" aria-label="Öğrenci filtresi">
+          <option value="">Tüm öğrenciler</option>
+          {students?.filter((s) => s.is_active || s.id === studentF).map((s) => <option key={s.id} value={s.id}>{s.full_name}</option>)}
+        </Select>
+        <Select value={courseF} onChange={(e) => setCourseF(e.target.value)} className="h-10 w-40 shrink-0 text-sm" aria-label="Kurs filtresi">
+          <option value="">Tüm kurslar</option>
+          {courses?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </Select>
+        {filtered && (
+          <Button size="sm" variant="ghost" className="h-10 shrink-0" icon={<X className="size-4" />} onClick={() => { setInstr(''); setStudentF(''); setCourseF('') }}>Temizle</Button>
         )}
       </div>
       <h2 className="mb-3 text-lg font-bold">{title}</h2>

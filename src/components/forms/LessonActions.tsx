@@ -16,7 +16,7 @@ export function AttendanceButtons({ lesson, compact }: { lesson: LessonWithRelat
   const allowed = can.lessons || (!!instructorId && lesson.instructor_id === instructorId)
   const mark = useDbMutation(
     ({ status }: { status: AttendanceStatus }) => lessonRpc.mark(lesson, status),
-    { success: (_r, v) => `Yoklama kaydedildi: ${ATTENDANCE_STATUS[v.status].label}`, invalidate: ['lessons', 'student-lessons', 'students', 'student'] },
+    { success: (_r, v) => `Yoklama kaydedildi: ${ATTENDANCE_STATUS[v.status].label}`, invalidate: ['lessons', 'lesson', 'student-lessons', 'students', 'student', 'activities'] },
   )
   if (!allowed || lesson.status === 'ertelendi') return null
   const current = lesson.attendance?.status
@@ -47,9 +47,10 @@ export function AttendanceButtons({ lesson, compact }: { lesson: LessonWithRelat
   )
 }
 
-type Mode = 'view' | 'reschedule' | 'cancel' | 'edit' | 'delete'
+export type LessonMode = 'view' | 'reschedule' | 'cancel' | 'edit' | 'delete'
+type Mode = LessonMode
 
-export function LessonSheet({ lesson, onClose }: { lesson: LessonWithRelations | null; onClose: () => void }) {
+export function LessonSheet({ lesson, onClose, initialMode = 'view' }: { lesson: LessonWithRelations | null; onClose: () => void; initialMode?: LessonMode }) {
   const { can, instructorId } = useAuth()
   const { data: settings } = useSettings()
   const { data: instructors } = useInstructors()
@@ -62,15 +63,15 @@ export function LessonSheet({ lesson, onClose }: { lesson: LessonWithRelations |
 
   useEffect(() => {
     if (!lesson) return
-    setMode('view')
+    setMode(initialMode)
     setDate(dateKey(lesson.starts_at))
     setTime(timeHM(lesson.starts_at))
     setDuration(minutesBetween(lesson.starts_at, lesson.ends_at))
     setInstr(lesson.instructor_id ?? '')
     setReason('')
-  }, [lesson])
+  }, [lesson?.id, initialMode]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const invalidate = ['lessons', 'student-lessons', 'students', 'student']
+  const invalidate = ['lessons', 'lesson', 'student-lessons', 'students', 'student', 'activities']
   const done = { invalidate, onSuccess: onClose }
   const reschedule = useDbMutation(() => lessonRpc.reschedule(lesson!, fromIstanbul(date, time), reason || null), { success: 'Ders ertelendi ve yeni tarihe taşındı', ...done })
   const cancel = useDbMutation(() => lessonRpc.cancel(lesson!, reason || null), { success: 'Ders iptal edildi', ...done })
@@ -133,6 +134,9 @@ export function LessonSheet({ lesson, onClose }: { lesson: LessonWithRelations |
           )}
 
           <div className="grid grid-cols-2 gap-2">
+            <Link to={`/ders/${lesson.id}`} onClick={onClose} className="flex h-11 items-center justify-center gap-2 rounded-2xl border border-slate-200 text-sm font-semibold dark:border-white/10">
+              <CalendarClock className="size-4" /> Ders detayı
+            </Link>
             {lesson.student && (
               <Link to={`/ogrenciler/${lesson.student.id}`} onClick={onClose} className="flex h-11 items-center justify-center gap-2 rounded-2xl border border-slate-200 text-sm font-semibold dark:border-white/10">
                 <User className="size-4" /> Öğrenci

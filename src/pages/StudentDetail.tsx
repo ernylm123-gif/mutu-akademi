@@ -1,8 +1,9 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { recentStudents } from '@/lib/recent'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Pencil, Phone, Plus, Trash2, CalendarPlus, Repeat, Wallet, StickyNote, Info, CalendarDays, Send } from 'lucide-react'
+import { Pencil, Phone, MessageCircle, Plus, Trash2, CalendarPlus, Repeat, Wallet, StickyNote, Info, CalendarDays, Send } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import {
   useStudent, useStudentLessons, useSchedules, useStudentNotes, usePayments, useInstallments, useBalances,
@@ -10,7 +11,7 @@ import {
 } from '@/lib/api'
 import { supabase } from '@/lib/supabase'
 import { addMonths, dateKey, formatDate, formatDateTime, WEEKDAYS } from '@/lib/time'
-import { formatMoney, INSTALLMENT_STATUS, PAYMENT_METHOD, telHref } from '@/lib/format'
+import { formatMoney, INSTALLMENT_STATUS, PAYMENT_METHOD, telHref, waHref } from '@/lib/format'
 import { scheduleSchema, type ScheduleFormInput, type ScheduleFormValues } from '@/lib/schemas'
 import type { Payment, WeeklySchedule } from '@/types/db'
 import { Avatar, Badge, Button, Card, ConfirmSheet, EmptyState, Field, Input, PageLoader, Segmented, Select, Sheet, Textarea } from '@/components/ui'
@@ -35,6 +36,7 @@ export function StudentDetailPage() {
   const [newLesson, setNewLesson] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  useEffect(() => { if (id) recentStudents.add(id) }, [id])
 
   const del = useDbMutation(
     async () => {
@@ -100,6 +102,7 @@ export function StudentDetailPage() {
         <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
           {s.phone && <a href={telHref(s.phone)} className="flex h-11 items-center justify-center gap-2 rounded-2xl bg-brand-50 text-sm font-semibold text-brand-700 dark:bg-brand-500/15 dark:text-brand-300"><Phone className="size-4" /> Öğrenci</a>}
           {s.guardian_phone && <a href={telHref(s.guardian_phone)} className="flex h-11 items-center justify-center gap-2 rounded-2xl bg-accent-50 text-sm font-semibold text-accent-700 dark:bg-accent-500/15 dark:text-accent-400"><Phone className="size-4" /> Veli</a>}
+          {can.staff && (s.guardian_phone || s.phone) && <a href={waHref(s.guardian_phone || s.phone)} target="_blank" rel="noopener noreferrer" className="flex h-11 items-center justify-center gap-2 rounded-2xl bg-emerald-50 text-sm font-semibold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"><MessageCircle className="size-4" /> WhatsApp</a>}
           {can.lessons && <Button variant="secondary" icon={<CalendarPlus className="size-4" />} onClick={() => setNewLesson(true)}>Ders ekle</Button>}
         </div>
       </Card>

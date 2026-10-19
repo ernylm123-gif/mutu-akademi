@@ -14,7 +14,7 @@ const PAY_KEYS = ['payments', 'installments', 'balances']
 export function PaymentFormSheet({ open, onClose, studentId, studentName, suggested }: {
   open: boolean; onClose: () => void; studentId: string; studentName: string; suggested?: number
 }) {
-  const { register, handleSubmit, reset, formState: { errors } } = useForm<PaymentFormInput, unknown, PaymentFormValues>({ resolver: zodResolver(paymentSchema) })
+  const { register, handleSubmit, reset, formState: { errors, isDirty } } = useForm<PaymentFormInput, unknown, PaymentFormValues>({ resolver: zodResolver(paymentSchema) })
   useEffect(() => {
     if (open) reset({ amount: suggested && suggested > 0 ? suggested : ('' as unknown as number), paid_at: dateKey(), method: 'nakit', note: '' })
   }, [open, reset, suggested])
@@ -24,7 +24,7 @@ export function PaymentFormSheet({ open, onClose, studentId, studentName, sugges
     onSuccess: onClose,
   })
   return (
-    <Sheet open={open} onClose={onClose} title={`Ödeme ekle – ${studentName}`}
+    <Sheet open={open} onClose={onClose} title={`Ödeme ekle – ${studentName}`} dirty={isDirty && !save.isPending}
       footer={<div className="flex gap-2"><Button variant="secondary" block onClick={onClose}>Vazgeç</Button><Button block loading={save.isPending} onClick={handleSubmit((v) => save.mutate(v))}>Kaydet</Button></div>}
     >
       <form className="grid gap-4" onSubmit={handleSubmit((v) => save.mutate(v))} noValidate>

@@ -16,5 +16,6 @@
     "types": ["vite/client", "vite-plugin-pwa/client", "vitest/globals", "@testing-library/jest-dom"],
     "paths": { "@/*": ["./src/*"] }
   },
-  "include": ["src", "tests/unit", "vite.config.ts"]
+  "include": ["src", "tests/unit", "vite.config.ts"],
+  "exclude": ["src/sw.ts"]
 }
