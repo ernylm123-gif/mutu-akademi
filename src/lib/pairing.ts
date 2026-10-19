@@ -45,22 +45,22 @@ export function isIosBrowserNotInstalled(): boolean {
   return ios && !standalone
 }
 
-/** Davet kodunu sunucuda tüketir ve cihaz için kalıcı, şifresiz oturum açar. */
+/**
+ * Şifresiz eşleştirme: cihaz Supabase anonim oturumu açar (tek başına hiçbir veriye erişemez),
+ * ardından tek kullanımlık davet kodunu sunucuda doğrulatır. Kod doğruysa cihaz yetkilendirilir.
+ * Oturum cihazda kalıcıdır; her açılışta şifre sorulmaz.
+ */
 export async function pairDevice(code: string, deviceName: string) {
-  const { data, error } = await supabase.functions.invoke('device-pair', { body: { code: normalizeCode(code), device_name: deviceName } })
-  if (error) {
-    let msg = 'Eşleştirme başarısız oldu.'
-    const ctx = (error as { context?: Response }).context
-    if (ctx && typeof ctx.json === 'function') {
-      try { msg = (await ctx.json())?.error ?? msg } catch { /* yoksay */ }
-    } else if (/fetch/i.test(error.message)) {
-      msg = 'Sunucuya ulaşılamadı. İnternet bağlantınızı kontrol edin.'
+  const { data: current } = await supabase.auth.getSession()
+  if (!current.session) {
+    const { error } = await supabase.auth.signInAnonymously({ options: { data: { full_name: deviceName } } })
+    if (error) {
+      if (/anonymous/i.test(error.message)) throw new Error('Sunucuda şifresiz cihaz girişi henüz açılmamış (Anonymous sign-ins). Yöneticiye bildirin.')
+      if (/fetch/i.test(error.message)) throw new Error('Sunucuya ulaşılamadı. İnternet bağlantınızı kontrol edin.')
+      throw new Error(error.message)
     }
-    throw new Error(msg)
   }
-  const tokenHash = (data as { token_hash?: string })?.token_hash
-  if (!tokenHash) throw new Error((data as { error?: string })?.error ?? 'Eşleştirme başarısız oldu.')
-  const { error: vErr } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type: 'magiclink' })
-  if (vErr) throw new Error('Oturum başlatılamadı. Yöneticinizden yeni bir davet kodu isteyin.')
-  return data as { name: string; role: string }
+  const { data, error } = await supabase.rpc('redeem_device_invite', { p_code: normalizeCode(code), p_name: deviceName })
+  if (error) throw new Error(error.message || 'Eşleştirme başarısız oldu.')
+  return data as { full_name: string; role: string }
 }

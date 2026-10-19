@@ -31,7 +31,8 @@ function Protected() {
   if (loading) return <div className="grid min-h-dvh place-items-center"><PageLoader /></div>
   if (!session) return <Navigate to="/eslestir" replace />
   if (!profile) return <div className="grid min-h-dvh place-items-center"><PageLoader /></div>
-  if (!profile.approved || !profile.is_active) return <PendingApprovalPage />
+  if (!profile.approved) return <PairPage />
+  if (!profile.is_active) return <PendingApprovalPage />
   return (
     <Suspense fallback={<PageLoader />}>
       <Routes>
@@ -70,7 +71,7 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/giris" element={<PublicOnly><LoginPage /></PublicOnly>} />
-        <Route path="/eslestir" element={<PublicOnly><PairPage /></PublicOnly>} />
+        <Route path="/eslestir" element={<PairPage />} />
         <Route path="/kayit" element={<PublicOnly><RegisterPage /></PublicOnly>} />
         <Route path="/sifremi-unuttum" element={<ForgotPasswordPage />} />
         <Route path="/sifre-yenile" element={<UpdatePasswordPage />} />

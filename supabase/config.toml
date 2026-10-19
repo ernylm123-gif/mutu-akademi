@@ -1,0 +1,4 @@
+project_id = "mutu-akademi"
+
+[functions.admin-users]
+verify_jwt = true

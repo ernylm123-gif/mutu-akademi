@@ -876,7 +876,6 @@ grant select on public.audit_logs to authenticated;
 -- ---------------------------------------------------------------------------
 -- Realtime
 -- ---------------------------------------------------------------------------
-alter table public.students replica identity full;
 alter table public.lessons replica identity full;
 alter table public.attendance replica identity full;
 alter table public.payments replica identity full;

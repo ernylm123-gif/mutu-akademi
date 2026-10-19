@@ -73,6 +73,7 @@ export function LoginPage() {
 // ---------------------------------------------------------------------------
 export function PairPage() {
   const navigate = useNavigate()
+  const { refreshProfile } = useAuth()
   const [code, setCode] = useState(() => {
     const k = new URLSearchParams(window.location.search).get('kod') ?? ''
     return k ? formatCode(k) : ''
@@ -102,6 +103,7 @@ export function PairPage() {
     setBusy(true)
     try {
       await pairDevice(code, name.trim() || guessDeviceName())
+      await refreshProfile()
       navigate('/', { replace: true })
     } catch (e) {
       setError((e as Error).message)
