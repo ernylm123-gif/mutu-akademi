@@ -61,7 +61,7 @@ npm run dev
 ### Supabase
 
 1. `supabase/migrations/` altındaki SQL dosyalarını sırayla uygulayın (Supabase CLI: `supabase db push`).
-2. Edge Function'ları yayınlayın: `supabase functions deploy admin-users` ve `supabase functions deploy device-pair --no-verify-jwt` (eşleştirme henüz oturumu olmayan cihazdan çağrılır; fonksiyon kodu kendisi doğrular).
+2. Supabase › Authentication › Sign In / Providers › **Allow anonymous sign-ins** açık olmalı (şifresiz cihaz eşleştirme için). `admin-users` Edge Function'ı isteğe bağlıdır (yalnızca e-posta hesapları için).
 3. İlk yönetici cihazı: aşağıdaki "İlk yönetici cihazı" bölümüne bakın.
 
 > **Service role anahtarı hiçbir zaman frontend'e veya `.env` dosyasına konmaz.** Yalnızca Edge Function içinde Supabase tarafından otomatik sağlanır.
@@ -73,6 +73,7 @@ npm run dev
 | `npm run dev` | Geliştirme sunucusu |
 | `npm run build` | TypeScript kontrolü + production build |
 | `npm test` | Birim ve entegrasyon testleri (Vitest) |
+| `npm run test:db` | Tüm migration'ları gerçek Postgres motorunda (PGlite) uygular, 36 RLS / iş kuralı testi |
 | `npm run test:e2e` | Uçtan uca testler (Playwright). Giriş gerektiren testler için `E2E_EMAIL`, `E2E_PASSWORD` |
 
 ## Şifresiz kullanım: cihaz eşleştirme
@@ -83,7 +84,7 @@ Nasıl çalışır:
 
 1. Yönetici *Menü › Cihazlar ve Kullanıcılar › Cihaz davet et* ile rol (Yönetici / Eğitmen / Personel) ve süre seçer.
 2. Ekranda **QR kod** ve `XXXXX-XXXXX` biçiminde **10 karakterlik kod** çıkar (50 bit rastgelelik). Veritabanında yalnızca kodun **SHA-256 özeti** saklanır.
-3. Yeni cihaz QR'ı okutur veya kodu girer → `device-pair` Edge Function kodu **atomik olarak tek seferlik** tüketir, cihaza özel bir Supabase Auth kullanıcısı açar ve şifresiz oturum başlatır.
+3. Yeni cihaz QR'ı okutur veya kodu girer → cihaz Supabase **anonim oturumu** açar (tek başına hiçbir veriye erişemez) ve `redeem_device_invite` veritabanı fonksiyonu kodu **atomik olarak tek seferlik** tüketip cihazı rolüyle yetkilendirir. 10 hatalı denemeden sonra o oturum kilitlenir.
 4. Oturum cihazda kalıcıdır ve otomatik yenilenir. Ana ekrana eklenen PWA, Safari/Chrome'un 7 günlük depolama silme kuralından muaftır.
 5. Yönetici bir cihazın erişimini *Cihaz yetkili* anahtarını kapatarak **anında** kaldırabilir (RLS hemen reddeder) veya cihazı tamamen silebilir.
 
