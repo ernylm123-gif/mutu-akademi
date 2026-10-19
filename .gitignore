@@ -11,3 +11,4 @@ test-results
 coverage
 .DS_Store
 ILK-KURULUM.sql
+supabase/.temp
