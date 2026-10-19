@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import clsx from 'clsx'
 import {
@@ -5,7 +6,7 @@ import {
   BookOpen, ShieldCheck, LogOut, WifiOff, RefreshCw, Download, Smartphone,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
-import { useNotifications } from '@/lib/api'
+import { useNotifications, rpc } from '@/lib/api'
 import { useRealtimeSync, useSyncStatus } from '@/hooks/useRealtimeSync'
 import { usePwaUpdate } from '@/hooks/usePwaUpdate'
 import { ROLE_LABEL } from '@/lib/format'
@@ -23,6 +24,9 @@ function useUnreadCount() {
 export function AppShell() {
   const { session, profile, can, signOut } = useAuth()
   useRealtimeSync(session?.user.id)
+  useEffect(() => {
+    if (session?.user.id) void rpc('touch_last_seen', {}).catch(() => undefined)
+  }, [session?.user.id])
   const unread = useUnreadCount()
   const { needRefresh, applyUpdate, dismiss } = usePwaUpdate()
   const navigate = useNavigate()
@@ -39,7 +43,7 @@ export function AppShell() {
     { to: '/odemeler', label: 'Ödemeler', icon: Wallet, show: can.payments },
     { to: '/raporlar', label: 'Raporlar', icon: BarChart3, show: can.staff },
     { to: '/kurslar', label: 'Kurslar', icon: BookOpen, show: can.staff },
-    { to: '/kullanicilar', label: 'Kullanıcılar', icon: UserCog, show: can.admin },
+    { to: '/kullanicilar', label: 'Cihazlar ve Kullanıcılar', icon: UserCog, show: can.admin },
     { to: '/islem-gecmisi', label: 'İşlem Geçmişi', icon: ShieldCheck, show: can.admin },
     { to: '/ayarlar', label: 'Ayarlar', icon: Settings, show: true },
     { to: '/kurulum', label: 'Telefona Yükle', icon: Smartphone, show: true },
@@ -79,7 +83,7 @@ export function AppShell() {
               <p className="truncate text-sm font-semibold">{profile.full_name || profile.email}</p>
               <p className="text-xs text-slate-500">{ROLE_LABEL[profile.role]}</p>
             </div>
-            <button onClick={() => void signOut()} className="grid size-9 place-items-center rounded-full text-slate-500 hover:bg-slate-200 dark:hover:bg-white/10" aria-label="Çıkış yap" title="Çıkış yap">
+            <button onClick={() => { if (!profile.is_device || window.confirm('Bu cihazın bağlantısı kesilecek. Tekrar kullanmak için yeni bir davet kodu gerekir. Devam edilsin mi?')) void signOut() }} className="grid size-9 place-items-center rounded-full text-slate-500 hover:bg-slate-200 dark:hover:bg-white/10" aria-label="Çıkış yap" title="Çıkış yap">
               <LogOut className="size-4" />
             </button>
           </div>

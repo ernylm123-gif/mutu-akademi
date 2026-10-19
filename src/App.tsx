@@ -4,7 +4,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { supabaseConfigured } from '@/lib/supabase'
 import { AppShell } from '@/components/layout/AppShell'
 import { PageLoader } from '@/components/ui'
-import { LoginPage, RegisterPage, ForgotPasswordPage, UpdatePasswordPage, PendingApprovalPage, MissingConfigPage } from '@/pages/Auth'
+import { LoginPage, PairPage, RegisterPage, ForgotPasswordPage, UpdatePasswordPage, PendingApprovalPage, MissingConfigPage } from '@/pages/Auth'
 import { DashboardPage } from '@/pages/Dashboard'
 
 const CalendarPage = lazy(() => import('@/pages/Calendar').then((m) => ({ default: m.CalendarPage })))
@@ -29,7 +29,7 @@ function Guard({ allow, children }: { allow: boolean; children: ReactNode }) {
 function Protected() {
   const { session, profile, loading, can } = useAuth()
   if (loading) return <div className="grid min-h-dvh place-items-center"><PageLoader /></div>
-  if (!session) return <Navigate to="/giris" replace />
+  if (!session) return <Navigate to="/eslestir" replace />
   if (!profile) return <div className="grid min-h-dvh place-items-center"><PageLoader /></div>
   if (!profile.approved || !profile.is_active) return <PendingApprovalPage />
   return (
@@ -70,6 +70,7 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/giris" element={<PublicOnly><LoginPage /></PublicOnly>} />
+        <Route path="/eslestir" element={<PublicOnly><PairPage /></PublicOnly>} />
         <Route path="/kayit" element={<PublicOnly><RegisterPage /></PublicOnly>} />
         <Route path="/sifremi-unuttum" element={<ForgotPasswordPage />} />
         <Route path="/sifre-yenile" element={<UpdatePasswordPage />} />

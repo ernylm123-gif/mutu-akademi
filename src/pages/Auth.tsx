@@ -1,10 +1,11 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { Clock, LogOut, Mail } from 'lucide-react'
+import { Clock, LogOut, Mail, Share, PlusSquare, ShieldCheck, Smartphone } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
+import { CODE_LENGTH, formatCode, guessDeviceName, isIosBrowserNotInstalled, normalizeCode, pairDevice } from '@/lib/pairing'
 import { errorMessage } from '@/lib/errors'
 import { loginSchema, registerSchema } from '@/lib/schemas'
 import { useAuth } from '@/hooks/useAuth'
@@ -60,11 +61,88 @@ export function LoginPage() {
         <Button type="submit" block size="lg" loading={formState.isSubmitting}>Giriş yap</Button>
       </form>
       <div className="mt-5 flex flex-col gap-2 text-center text-sm">
-        <Link to="/sifremi-unuttum" className="font-medium text-brand-600">Şifremi unuttum</Link>
-        <span className="text-slate-500">
-          Hesabınız yok mu? <Link to="/kayit" className="font-semibold text-brand-600">Hesap talebi oluştur</Link>
-        </span>
+        <Link to="/eslestir" className="font-semibold text-brand-600">Davet koduyla şifresiz bağlan</Link>
+        <Link to="/sifremi-unuttum" className="font-medium text-slate-500">Şifremi unuttum</Link>
       </div>
+    </AuthLayout>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Şifresiz cihaz eşleştirme
+// ---------------------------------------------------------------------------
+export function PairPage() {
+  const navigate = useNavigate()
+  const [code, setCode] = useState(() => {
+    const k = new URLSearchParams(window.location.search).get('kod') ?? ''
+    return k ? formatCode(k) : ''
+  })
+  const [name, setName] = useState(guessDeviceName)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [continueHere, setContinueHere] = useState(false)
+  const fromLink = new URLSearchParams(window.location.search).has('kod')
+  const iosBrowser = isIosBrowserNotInstalled()
+
+  // Kodu adres çubuğundan ve geçmişten kaldır
+  useEffect(() => {
+    if (fromLink) window.history.replaceState(null, '', '/eslestir')
+  }, [fromLink])
+
+  const submit = async () => {
+    setError(null)
+    if (normalizeCode(code).length !== CODE_LENGTH) {
+      setError('Davet kodu 10 karakter olmalıdır (ör. AB3K9-7XQ2M).')
+      return
+    }
+    if (!navigator.onLine) {
+      setError('İnternet bağlantısı yok.')
+      return
+    }
+    setBusy(true)
+    try {
+      await pairDevice(code, name.trim() || guessDeviceName())
+      navigate('/', { replace: true })
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (iosBrowser && fromLink && !continueHere) {
+    return (
+      <AuthLayout title="Önce ana ekrana ekleyin" subtitle="iPhone ve iPad'de eşleştirme, ana ekrana eklenen uygulamanın içinde yapılmalıdır.">
+        <ol className="space-y-3 text-sm">
+          <li className="flex gap-3"><span className="grid size-7 shrink-0 place-items-center rounded-full bg-brand-50 font-bold text-brand-700">1</span><span>Alttaki <Share className="inline size-4" /> <b>Paylaş</b> → <PlusSquare className="inline size-4" /> <b>Ana Ekrana Ekle</b>'ye dokunun.</span></li>
+          <li className="flex gap-3"><span className="grid size-7 shrink-0 place-items-center rounded-full bg-brand-50 font-bold text-brand-700">2</span><span>Ana ekrandaki <b>Mutu Akademi</b> simgesini açın.</span></li>
+          <li className="flex gap-3"><span className="grid size-7 shrink-0 place-items-center rounded-full bg-brand-50 font-bold text-brand-700">3</span><span>Açılan ekrana bu kodu girin:</span></li>
+        </ol>
+        <p className="mt-4 select-all rounded-2xl bg-slate-100 py-4 text-center font-mono text-2xl font-bold tracking-widest dark:bg-white/10">{code}</p>
+        <p className="mt-2 text-center text-xs text-slate-500">Kodu not alın. Tek kullanımlıktır.</p>
+        <button onClick={() => setContinueHere(true)} className="mt-5 w-full text-center text-sm font-medium text-slate-500">Ana ekrana eklemeden bu tarayıcıda devam et</button>
+      </AuthLayout>
+    )
+  }
+
+  return (
+    <AuthLayout title="Cihazı bağla" subtitle="Yöneticinizden aldığınız tek kullanımlık davet kodunu girin. Bu işlem cihaz başına yalnızca bir kez yapılır; sonrasında uygulama şifresiz açılır.">
+      <form onSubmit={(e) => { e.preventDefault(); void submit() }} className="space-y-4" noValidate>
+        <Field label="Davet kodu">
+          <Input value={code} onChange={(e) => setCode(formatCode(e.target.value).slice(0, 11))} placeholder="XXXXX-XXXXX" autoCapitalize="characters" autoComplete="one-time-code" spellCheck={false}
+            className="text-center font-mono text-xl tracking-widest" />
+        </Field>
+        <Field label="Bu cihazın adı" hint="Yönetici cihaz listesinde bu adı görür.">
+          <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={60} />
+        </Field>
+        {error && <p role="alert" className="rounded-xl bg-red-50 px-3 py-2 text-sm font-medium text-red-700 dark:bg-red-500/15 dark:text-red-300">{error}</p>}
+        <Button type="submit" block size="lg" loading={busy} icon={<Smartphone className="size-5" />}>Cihazı bağla</Button>
+      </form>
+      <div className="mt-5 flex items-start gap-2 rounded-xl bg-slate-50 p-3 text-xs text-slate-500 dark:bg-white/5">
+        <ShieldCheck className="mt-0.5 size-4 shrink-0 text-brand-600" />
+        <span>Uygulama adresi herkese açıktır ama veriler yalnızca yönetici tarafından yetkilendirilmiş cihazlarda görünür. Yönetici bir cihazın erişimini istediği an kaldırabilir.</span>
+      </div>
+      <p className="mt-4 text-center text-xs"><Link to="/giris" className="text-slate-400">E-posta ile giriş</Link></p>
     </AuthLayout>
   )
 }
@@ -186,14 +264,14 @@ export function PendingApprovalPage() {
         {profileError ? (
           <p>Profil bilgisi alınamadı: {profileError}</p>
         ) : inactive ? (
-          <p>Hesabınız yönetici tarafından pasif duruma alınmış. Lütfen yöneticinizle iletişime geçin.</p>
+          <p>{profile?.is_device ? 'Bu cihazın yetkisi yönetici tarafından kaldırıldı.' : 'Hesabınız yönetici tarafından pasif duruma alınmış.'} Lütfen yöneticinizle iletişime geçin.</p>
         ) : (
           <p>Hesabınız oluşturuldu ve <b>yönetici onayı</b> bekliyor. Onaylandığında bu sayfa otomatik olarak açılacaktır.</p>
         )}
         <p className="text-xs text-slate-400">{profile?.email}</p>
         <div className="mt-2 flex w-full gap-2">
           <Button variant="secondary" block onClick={() => void refreshProfile()}>Yenile</Button>
-          <Button variant="ghost" block icon={<LogOut className="size-4" />} onClick={() => void signOut()}>Çıkış</Button>
+          <Button variant="ghost" block icon={<LogOut className="size-4" />} onClick={() => void signOut()}>{profile?.is_device ? 'Yeni kodla bağla' : 'Çıkış'}</Button>
         </div>
       </div>
     </AuthLayout>

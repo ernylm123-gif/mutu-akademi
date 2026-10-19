@@ -62,11 +62,15 @@ export function SettingsPage() {
         <Field label="Telefon"><Input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} /></Field>
         <div className="flex justify-end"><Button loading={saveProfile.isPending} onClick={() => saveProfile.mutate(undefined)} disabled={name.trim().length < 2}>Kaydet</Button></div>
       </Card>
-      <SectionTitle>Şifre değiştir</SectionTitle>
-      <Card className="flex gap-2 p-4">
-        <Input type="password" placeholder="Yeni şifre (en az 8 karakter)" value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="new-password" />
-        <Button disabled={pw.length < 8} loading={changePw.isPending} onClick={() => changePw.mutate(undefined)}>Değiştir</Button>
-      </Card>
+      {!profile?.is_device && (
+        <>
+          <SectionTitle>Şifre değiştir</SectionTitle>
+          <Card className="flex gap-2 p-4">
+            <Input type="password" placeholder="Yeni şifre (en az 8 karakter)" value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="new-password" />
+            <Button disabled={pw.length < 8} loading={changePw.isPending} onClick={() => changePw.mutate(undefined)}>Değiştir</Button>
+          </Card>
+        </>
+      )}
       {can.admin && settings && (
         <>
           <SectionTitle>Ders hakkı ve bildirim kuralları</SectionTitle>
@@ -236,7 +240,7 @@ export function InstallPage() {
       </div>
       <Card className="mt-4 flex gap-3 p-4 text-sm text-slate-600 dark:text-slate-300">
         <ShieldCheck className="size-5 shrink-0 text-brand-600" />
-        <p>Uygulama adresini herkes açabilir, ancak öğrenci ve ders verilerini yalnızca giriş yapmış ve yönetici tarafından onaylanmış kullanıcılar görebilir. Yeni sürüm yayınlandığında uygulama otomatik olarak güncellenir.</p>
+        <p>Uygulama adresini herkes açabilir, ancak öğrenci ve ders verilerini yalnızca yönetici tarafından davet koduyla yetkilendirilmiş cihazlar görebilir. Yetkilendirilmiş cihaz her açılışta şifre sormadan doğrudan ana panele girer. Yeni sürüm yayınlandığında uygulama otomatik olarak güncellenir.</p>
       </Card>
     </div>
   )

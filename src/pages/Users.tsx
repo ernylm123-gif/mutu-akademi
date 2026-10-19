@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { UserPlus, ShieldCheck, Check, X, KeyRound, Trash2 } from 'lucide-react'
+import { UserPlus, ShieldCheck, Check, X, KeyRound, Trash2, QrCode, Smartphone } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useProfiles, useDbMutation, adminUsers } from '@/lib/api'
 import { supabase } from '@/lib/supabase'
@@ -11,6 +11,7 @@ import { ROLE_LABEL } from '@/lib/format'
 import type { AppRole, Permissions, Profile } from '@/types/db'
 import { Avatar, Badge, Button, Card, ConfirmSheet, Field, Input, PageLoader, SectionTitle, Select, Sheet, Toggle } from '@/components/ui'
 import { PageHeader } from '@/components/layout/AppShell'
+import { InviteSheet, PendingInvites, lastSeenText } from '@/components/forms/InviteForms'
 
 async function updateProfile(id: string, patch: Partial<Profile>) {
   const { data, error } = await supabase.from('profiles').update(patch).eq('id', id).select().maybeSingle()
@@ -23,6 +24,7 @@ export function UsersPage() {
   const { session } = useAuth()
   const { data, isLoading } = useProfiles()
   const [creating, setCreating] = useState(false)
+  const [inviting, setInviting] = useState(false)
   const [editing, setEditing] = useState<Profile | null>(null)
   const approve = useDbMutation((p: Profile) => updateProfile(p.id, { approved: true, is_active: true }), { success: 'Kullanıcı onaylandı', invalidate: ['profiles'] })
   const [rejecting, setRejecting] = useState<Profile | null>(null)
@@ -34,8 +36,16 @@ export function UsersPage() {
 
   return (
     <div>
-      <PageHeader title="Kullanıcılar" subtitle="Yönetici, eğitmen ve personel hesapları"
-        actions={<Button icon={<UserPlus className="size-4" />} onClick={() => setCreating(true)}>Kullanıcı oluştur</Button>} />
+      <PageHeader title="Cihazlar ve Kullanıcılar" subtitle="Şifresiz cihaz davetleri, roller ve erişim"
+        actions={<>
+          <Button icon={<QrCode className="size-4" />} onClick={() => setInviting(true)}>Cihaz davet et</Button>
+          <Button variant="secondary" icon={<UserPlus className="size-4" />} onClick={() => setCreating(true)}>E-posta hesabı</Button>
+        </>} />
+      <Card className="mb-4 flex gap-3 p-4 text-sm text-slate-600 dark:text-slate-300">
+        <Smartphone className="size-5 shrink-0 text-brand-600" />
+        <p><b>Yeni telefon eklemek için:</b> "Cihaz davet et" → oluşan QR kodu yeni telefonun kamerasıyla okutun (veya kodu girin). Telefon bir kez bağlandıktan sonra uygulama şifre sormadan doğrudan ana panele açılır. Erişimi kaldırmak için cihazı açıp "Hesap aktif" seçeneğini kapatın.</p>
+      </Card>
+      <PendingInvites />
       {pending.length > 0 && (
         <>
           <SectionTitle>Onay bekleyen talepler ({pending.length})</SectionTitle>
@@ -52,14 +62,14 @@ export function UsersPage() {
           <p className="mb-4 text-xs text-slate-500">Onaylanan kullanıcı varsayılan olarak "Personel" rolüyle başlar. Rolünü aşağıdan değiştirebilirsiniz.</p>
         </>
       )}
-      <SectionTitle>Aktif hesaplar</SectionTitle>
+      <SectionTitle>Bağlı cihazlar ve hesaplar</SectionTitle>
       <Card className="divide-y divide-slate-100 dark:divide-white/10">
         {users.map((p) => (
           <button key={p.id} onClick={() => setEditing(p)} className="flex w-full items-center gap-3 p-3.5 text-left">
             <Avatar name={p.full_name || p.email} size={40} />
             <div className="min-w-0 flex-1">
               <p className="truncate font-semibold">{p.full_name} {p.id === session?.user.id && <span className="text-xs font-normal text-slate-400">(siz)</span>}</p>
-              <p className="truncate text-xs text-slate-500">{p.email}</p>
+              <p className="truncate text-xs text-slate-500">{p.is_device ? `Şifresiz cihaz · ${lastSeenText(p.last_seen_at)}` : p.email}</p>
             </div>
             <Badge tone={p.role === 'admin' ? 'accent' : p.role === 'egitmen' ? 'brand' : 'slate'}>{ROLE_LABEL[p.role]}</Badge>
             {!p.is_active && <Badge tone="red">Pasif</Badge>}
@@ -71,6 +81,7 @@ export function UsersPage() {
         <p>Yetkiler veritabanında Row Level Security ile uygulanır. Eğitmenler yalnızca kendi derslerini ve öğrencilerini görür; personel yalnızca izin verilen işlemleri yapabilir. Şifreler Supabase Auth tarafından güvenli biçimde saklanır.</p>
       </Card>
       <CreateUserSheet open={creating} onClose={() => setCreating(false)} />
+      <InviteSheet open={inviting} onClose={() => setInviting(false)} />
       <EditUserSheet profile={editing} onClose={() => setEditing(null)} isSelf={editing?.id === session?.user.id} />
       <ConfirmSheet open={!!rejecting} onClose={() => setRejecting(null)} onConfirm={() => rejecting && reject.mutate(rejecting)} loading={reject.isPending} danger
         title="Talep reddedilsin mi?" confirmLabel="Reddet ve sil" text={`${rejecting?.email ?? ''} hesabı kalıcı olarak silinecek.`} />
@@ -123,7 +134,7 @@ function EditUserSheet({ profile, onClose, isSelf }: { profile: Profile | null; 
     <Sheet open={!!profile} onClose={onClose} title="Kullanıcıyı düzenle"
       footer={<div className="flex gap-2"><Button variant="secondary" block onClick={onClose}>Vazgeç</Button><Button block loading={save.isPending} onClick={() => save.mutate(undefined)}>Kaydet</Button></div>}>
       <div className="grid gap-4">
-        <p className="text-sm text-slate-500">{profile.email}</p>
+        <p className="text-sm text-slate-500">{profile.is_device ? `Şifresiz cihaz · ${lastSeenText(profile.last_seen_at)}` : profile.email}</p>
         <Field label="Ad soyad"><Input value={name} onChange={(e) => setName(e.target.value)} /></Field>
         <Field label="Rol">
           <Select value={role} onChange={(e) => setRole(e.target.value as AppRole)} disabled={isSelf}>
@@ -140,15 +151,15 @@ function EditUserSheet({ profile, onClose, isSelf }: { profile: Profile | null; 
             <Toggle checked={!!perms.payments} onChange={(v) => setPerms({ ...perms, payments: v })} label="Ödemeler" description="Ödeme ve taksit görüntüleme / ekleme" />
           </div>
         )}
-        {!isSelf && <Toggle checked={active} onChange={setActive} label="Hesap aktif" description="Pasif hesaplar hiçbir veriye erişemez." />}
-        <div className="rounded-2xl border border-slate-200 p-3 dark:border-white/10">
+        {!isSelf && <Toggle checked={active} onChange={setActive} label={profile.is_device ? 'Cihaz yetkili' : 'Hesap aktif'} description="Kapatıldığında bu cihaz/hesap anında hiçbir veriye erişemez." />}
+        {!profile.is_device && <div className="rounded-2xl border border-slate-200 p-3 dark:border-white/10">
           <p className="mb-2 text-sm font-semibold">Şifre belirle</p>
           <div className="flex gap-2">
             <Input type="text" placeholder="Yeni şifre (en az 8)" value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="new-password" />
             <Button variant="secondary" icon={<KeyRound className="size-4" />} disabled={pw.length < 8} loading={resetPw.isPending} onClick={() => resetPw.mutate(undefined)}>Ayarla</Button>
           </div>
-        </div>
-        {!isSelf && <Button variant="ghost" className="text-red-600" icon={<Trash2 className="size-4" />} onClick={() => setConfirmDel(true)}>Hesabı sil</Button>}
+        </div>}
+        {!isSelf && <Button variant="ghost" className="text-red-600" icon={<Trash2 className="size-4" />} onClick={() => setConfirmDel(true)}>{profile.is_device ? 'Cihazı kaldır' : 'Hesabı sil'}</Button>}
       </div>
       <ConfirmSheet open={confirmDel} onClose={() => setConfirmDel(false)} onConfirm={() => del.mutate(undefined)} loading={del.isPending} danger title="Hesap silinsin mi?" confirmLabel="Sil"
         text="Kullanıcı hesabı kalıcı olarak silinir. Oluşturduğu kayıtlar korunur. Geçici olarak engellemek için 'Hesap aktif' seçeneğini kapatın." />

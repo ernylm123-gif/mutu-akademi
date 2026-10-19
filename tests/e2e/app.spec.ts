@@ -1,10 +1,11 @@
 import { test, expect, type Browser } from '@playwright/test'
 
 test.describe('herkese açık sayfalar', () => {
-  test('giriş yapmamış kullanıcı giriş sayfasına yönlendirilir', async ({ page }) => {
+  test('yetkisiz cihaz şifre değil, cihaz eşleştirme ekranı görür', async ({ page }) => {
     await page.goto('/ogrenciler')
-    await expect(page).toHaveURL(/\/giris$/)
-    await expect(page.getByRole('heading', { name: 'Giriş yap' })).toBeVisible()
+    await expect(page).toHaveURL(/\/eslestir$/)
+    await expect(page.getByRole('heading', { name: 'Cihazı bağla' })).toBeVisible()
+    await expect(page.getByLabel('Şifre')).toHaveCount(0)
     await expect(page.getByText('MUTU AKADEMİ').first()).toBeVisible()
   })
 
@@ -24,9 +25,12 @@ test.describe('herkese açık sayfalar', () => {
     await expect(page).toHaveURL(/\/giris$/)
   })
 
-  test('hesap talebi sayfası açık üyelik olmadığını belirtir', async ({ page }) => {
-    await page.goto('/kayit')
-    await expect(page.getByText(/yönetici onayından sonra/)).toBeVisible()
+  test('geçersiz davet kodu reddedilir ve veri gösterilmez', async ({ page }) => {
+    await page.goto('/eslestir?kod=AAAAA-BBBBB')
+    await expect(page).toHaveURL(/\/eslestir$/) // kod adres çubuğundan silinir
+    await page.getByRole('button', { name: 'Cihazı bağla' }).click()
+    await expect(page.getByRole('alert')).toBeVisible({ timeout: 15_000 })
+    await expect(page).toHaveURL(/\/eslestir$/)
   })
 
   test('PWA manifest ve service worker', async ({ page, request }) => {

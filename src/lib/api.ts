@@ -4,7 +4,7 @@ import { assertOnline, ConflictError, errorMessage } from '@/lib/errors'
 import { useToast } from '@/components/ui/Toast'
 import type {
   AppNotification, AppSettings, AuditLog, Course, InstallmentView, Instructor, LessonWithRelations,
-  Payment, Profile, Student, StudentBalance, StudentNote, WeeklySchedule, AttendanceStatus, Lesson,
+  Payment, Profile, DeviceInvite, Student, StudentBalance, StudentNote, WeeklySchedule, AttendanceStatus, Lesson,
 } from '@/types/db'
 
 // ---------------------------------------------------------------------------
@@ -23,6 +23,7 @@ export const TABLE_KEYS: Record<string, string[]> = {
   weekly_schedules: ['schedules'],
   student_notes: ['student-notes'],
   app_settings: ['settings', 'students'],
+  device_invites: ['invites'],
 }
 
 const LESSON_SELECT =
@@ -72,6 +73,16 @@ export const useProfiles = (enabled = true) =>
     queryKey: ['profiles'],
     enabled,
     queryFn: () => unwrap<Profile[]>(supabase.from('profiles').select('*').order('created_at')),
+  })
+
+export const useInvites = (enabled = true) =>
+  useQuery({
+    queryKey: ['invites'],
+    enabled,
+    queryFn: () =>
+      unwrap<DeviceInvite[]>(
+        supabase.from('device_invites').select('id,label,role,permissions,instructor_id,created_by,created_at,expires_at,used_at,used_by').order('created_at', { ascending: false }).limit(50),
+      ),
   })
 
 export const useSettings = () =>

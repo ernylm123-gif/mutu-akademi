@@ -4,7 +4,7 @@ Birden fazla yönetici, eğitmen ve personelin **aynı anda, farklı telefonlard
 
 - Bir telefonda eklenen öğrenci, işaretlenen yoklama, değiştirilen ders saati veya girilen ödeme **sayfa yenilemeden** diğer tüm cihazlarda görünür.
 - Google Play / App Store / APK gerekmez: tarayıcıdan açılıp **ana ekrana eklenir**.
-- Uygulama adresi herkese açıktır; **veriler yalnızca giriş yapmış ve onaylanmış kullanıcılara** açıktır (PostgreSQL Row Level Security).
+- Uygulama adresi herkese açıktır; **veriler yalnızca yönetici tarafından yetkilendirilmiş cihazlara** açıktır (PostgreSQL Row Level Security). Şifre yoktur: cihazlar bir kez tek kullanımlık davet kodu / QR ile bağlanır.
 
 ## Teknolojiler
 
@@ -22,7 +22,7 @@ React 19 · TypeScript · Vite · Tailwind CSS 4 · TanStack Query · React Hook
 | Eğitmenler | Ekleme, renk, hesap bağlama, haftalık program, verilen ders sayısı, notlar |
 | Bildirimler | Yeni öğrenci, ders değişikliği, iptal, devamsızlık, düşük ders hakkı, yaklaşan/gecikmiş ödeme (rol bazlı) |
 | Raporlar | Öğrenci sayıları, eğitmen dersleri, devamsızlık, ödeme durumu, günlük/haftalık/aylık; **PDF ve CSV** |
-| Kullanıcılar | Hesap oluşturma, rol & izin, onay bekleyen talepler, pasifleştirme, şifre belirleme |
+| Cihazlar ve Kullanıcılar | Şifresiz cihaz daveti (QR + kod), rol & izin, cihaz erişimini anında kaldırma, son görülme |
 | İşlem geçmişi | Tüm önemli tablolar için değiştirilemez audit log |
 
 ### Ders hakkı kuralı (merkezi, sunucuda)
@@ -61,8 +61,8 @@ npm run dev
 ### Supabase
 
 1. `supabase/migrations/` altındaki SQL dosyalarını sırayla uygulayın (Supabase CLI: `supabase db push`).
-2. `supabase/functions/admin-users` Edge Function'ını yayınlayın: `supabase functions deploy admin-users`.
-3. İlk yönetici: aşağıdaki "İlk yönetici hesabı" bölümüne bakın.
+2. Edge Function'ları yayınlayın: `supabase functions deploy admin-users` ve `supabase functions deploy device-pair --no-verify-jwt` (eşleştirme henüz oturumu olmayan cihazdan çağrılır; fonksiyon kodu kendisi doğrular).
+3. İlk yönetici cihazı: aşağıdaki "İlk yönetici cihazı" bölümüne bakın.
 
 > **Service role anahtarı hiçbir zaman frontend'e veya `.env` dosyasına konmaz.** Yalnızca Edge Function içinde Supabase tarafından otomatik sağlanır.
 
@@ -75,26 +75,33 @@ npm run dev
 | `npm test` | Birim ve entegrasyon testleri (Vitest) |
 | `npm run test:e2e` | Uçtan uca testler (Playwright). Giriş gerektiren testler için `E2E_EMAIL`, `E2E_PASSWORD` |
 
-## İlk yönetici hesabı
+## Şifresiz kullanım: cihaz eşleştirme
 
-İlk yönetici e-posta adresi veritabanındaki `private.bootstrap_admins` tablosunda tanımlıdır (API üzerinden erişilemez).
+Uygulama **şifre veya giriş ekranı istemez**. Her telefon/tablet/bilgisayar **bir kez** tek kullanımlık davet kodu (veya QR) ile yetkilendirilir; sonrasında her açılışta doğrudan ana panele girer.
 
-1. Uygulama adresinde **Hesap talebi oluştur**'a tıklayın.
-2. Bu e-posta adresi ve **kendi belirlediğiniz güçlü bir şifre** ile kayıt olun.
-3. E-postanıza gelen doğrulama bağlantısına tıklayın.
-4. Giriş yapın: hesabınız otomatik olarak **Yönetici** olur.
+Nasıl çalışır:
 
-Farklı bir e-posta kullanmak için Supabase SQL Editor'da:
+1. Yönetici *Menü › Cihazlar ve Kullanıcılar › Cihaz davet et* ile rol (Yönetici / Eğitmen / Personel) ve süre seçer.
+2. Ekranda **QR kod** ve `XXXXX-XXXXX` biçiminde **10 karakterlik kod** çıkar (50 bit rastgelelik). Veritabanında yalnızca kodun **SHA-256 özeti** saklanır.
+3. Yeni cihaz QR'ı okutur veya kodu girer → `device-pair` Edge Function kodu **atomik olarak tek seferlik** tüketir, cihaza özel bir Supabase Auth kullanıcısı açar ve şifresiz oturum başlatır.
+4. Oturum cihazda kalıcıdır ve otomatik yenilenir. Ana ekrana eklenen PWA, Safari/Chrome'un 7 günlük depolama silme kuralından muaftır.
+5. Yönetici bir cihazın erişimini *Cihaz yetkili* anahtarını kapatarak **anında** kaldırabilir (RLS hemen reddeder) veya cihazı tamamen silebilir.
+
+> **iPhone/iPad notu:** Ana ekrana eklenen uygulama Safari'den ayrı bir depolama kullanır. Bu yüzden eşleştirme, ana ekrana eklenen uygulamanın **içinde** yapılmalıdır. QR Safari'de açılırsa uygulama bunu algılar ve önce "Ana Ekrana Ekle" talimatını, ardından girilecek kodu gösterir.
+
+### İlk yönetici cihazı
+
+İlk kurulumda veritabanına tek kullanımlık bir **yönetici daveti** eklenir. Yöneticinin ilk telefonu bu kodla bağlanır; diğer tüm cihazlar uygulama içinden davet edilir. Yeni bir ilk-yönetici daveti gerekirse (ör. tüm yönetici cihazları kaybolduysa) Supabase SQL Editor'da:
 
 ```sql
-insert into private.bootstrap_admins (email) values ('yeni@adres.com');
+-- KOD: kendi oluşturduğunuz 10 karakterlik kod (0-9 ve I, L, O, U hariç büyük harfler)
+insert into public.device_invites (code_hash, label, role, expires_at)
+values (encode(extensions.digest('KODUNUZ', 'sha256'), 'hex'), 'Yönetici', 'admin', now() + interval '1 day');
 ```
 
-## Personele hesap verme
+### E-posta ile giriş (isteğe bağlı)
 
-- **Yöntem 1 (önerilen):** *Menü › Kullanıcılar › Kullanıcı oluştur* → ad, e-posta, geçici şifre ve rol. Hesap anında aktiftir.
-- **Yöntem 2:** Kişi *Hesap talebi oluştur* ile kayıt olur → *Kullanıcılar › Onay bekleyen talepler* → **Onayla**.
-- Eğitmen hesabını *Eğitmenler › (eğitmen) › Düzenle › Kullanıcı hesabı* alanından eğitmen kaydına bağlayın.
+Klasik e-posta/şifre girişi yedek olarak durur (*Cihazı bağla* ekranının altındaki küçük bağlantı). Yönetici *E-posta hesabı* ile hesap açabilir. Günlük kullanımda gerekmez.
 
 ## Telefona yükleme
 

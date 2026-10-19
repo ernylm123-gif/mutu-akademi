@@ -19,8 +19,23 @@ export interface Profile {
   is_active: boolean
   approved: boolean
   permissions: Permissions
+  is_device: boolean
+  last_seen_at: string | null
   created_at: string
   updated_at: string
+}
+
+export interface DeviceInvite {
+  id: string
+  label: string
+  role: AppRole
+  permissions: Permissions
+  instructor_id: string | null
+  created_by: string | null
+  created_at: string
+  expires_at: string
+  used_at: string | null
+  used_by: string | null
 }
 
 export interface AppSettings {
