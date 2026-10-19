@@ -1,0 +1,63 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Mutu Akademi kurumsal renkleri – logodaki CMYK paletinden */
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --color-brand-50: #eef8fd;
+  --color-brand-100: #d6eefa;
+  --color-brand-200: #ade0f5;
+  --color-brand-300: #78cbee;
+  --color-brand-400: #45b6e6;
+  --color-brand-500: #29a8df;
+  --color-brand-600: #1689bf;
+  --color-brand-700: #126d99;
+  --color-brand-800: #125a7d;
+  --color-brand-900: #134b67;
+  --color-accent-50: #fdf0f7;
+  --color-accent-100: #fbe0ef;
+  --color-accent-400: #e65aa9;
+  --color-accent-500: #d6268b;
+  --color-accent-600: #b81a74;
+  --color-accent-700: #93165e;
+  --color-sun-100: #fbf8c9;
+  --color-sun-400: #ede645;
+  --color-sun-500: #e6df24;
+  --color-sun-700: #8a8410;
+  --color-ink-900: #0f1115;
+  --radius-card: 1.25rem;
+}
+
+:root {
+  color-scheme: light;
+  -webkit-tap-highlight-color: transparent;
+}
+.dark { color-scheme: dark; }
+
+html, body, #root { min-height: 100%; }
+body {
+  @apply bg-slate-50 text-slate-900 antialiased dark:bg-[#0b0f14] dark:text-slate-100;
+  overscroll-behavior-y: none;
+}
+
+.safe-top { padding-top: env(safe-area-inset-top); }
+.safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+.pb-nav { padding-bottom: calc(5.5rem + env(safe-area-inset-bottom)); }
+
+.card {
+  @apply rounded-[var(--radius-card)] border border-slate-200/70 bg-white shadow-[0_1px_2px_rgba(15,17,21,.04),0_8px_24px_-12px_rgba(15,17,21,.08)] dark:border-white/10 dark:bg-[#121821];
+}
+.brand-gradient { background-image: linear-gradient(135deg, #29a8df 0%, #1689bf 55%, #d6268b 130%); }
+.cmyk-bar { background-image: linear-gradient(90deg, #29a8df 0 25%, #d6268b 25% 50%, #e6df24 50% 75%, #111 75% 100%); }
+
+.fade-in { animation: fade-in .18s ease-out; }
+.slide-up { animation: slide-up .22s cubic-bezier(.2,.8,.2,1); }
+@keyframes fade-in { from { opacity: 0 } to { opacity: 1 } }
+@keyframes slide-up { from { transform: translateY(16px); opacity: 0 } to { transform: none; opacity: 1 } }
+@media (prefers-reduced-motion: reduce) { .fade-in, .slide-up { animation: none } }
+
+@media print {
+  .no-print { display: none !important; }
+  body { background: #fff; }
+}
