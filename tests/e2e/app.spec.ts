@@ -14,6 +14,26 @@ test.describe('herkese açık sayfalar', () => {
     await expect(page.getByText('MUTU AKADEMİ').first()).toBeVisible()
   })
 
+  test('süresi dolmuş/geçersiz oturumla açılış takılmaz, yetkisiz ekranına düşer', async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem('mutu-akademi-auth', JSON.stringify({
+        access_token: 'gecersiz.jwt.token', refresh_token: 'gecersiz-yenileme', token_type: 'bearer',
+        expires_in: 3600, expires_at: Math.floor(Date.now() / 1000) - 60,
+        user: { id: '00000000-0000-0000-0000-000000000001', aud: 'authenticated', role: 'authenticated', app_metadata: {}, user_metadata: {}, created_at: new Date().toISOString() },
+      }))
+    })
+    const t0 = Date.now()
+    await page.goto('/')
+    await expect(page.getByRole('heading', { name: /Bu cihaz yetkili değil|Sunucuya bağlanılamadı|Sunucu hatası/ })).toBeVisible({ timeout: 20_000 })
+    expect(Date.now() - t0).toBeLessThan(20_000)
+  })
+
+  test('yetkili açılış sonrası hiçbir giriş formu yok; yükleme ekranı sonsuz değil', async ({ page }) => {
+    await page.goto('/')
+    await expect(page.getByRole('heading', { name: 'Bu cihaz yetkili değil' })).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText('Açılış beklenenden uzun sürdü')).toHaveCount(0)
+  })
+
   test('ders detay bağlantısı (bildirimden) yetkisiz cihazda veri göstermez', async ({ page }) => {
     await page.goto('/ders/00000000-0000-0000-0000-000000000000')
     await expect(page.getByRole('heading', { name: 'Bu cihaz yetkili değil' })).toBeVisible()
