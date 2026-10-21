@@ -6,6 +6,13 @@ import { Button, PageLoader } from '@/components/ui'
  * Güvenli önbellek yenileme: Service Worker ve uygulama dosyası önbelleklerini siler, sayfayı yeniden yükler.
  * Oturum ve cihaz yetkisi (localStorage) KORUNUR; kaydedilmiş hiçbir veri silinmez.
  */
+/** Safari güvenli yeniden yükleme: uygulama dosyalarını önbelleği atlayarak indirip sayfayı yeniler (bkz. boot-watchdog.js) */
+export function safeReload() {
+  const w = window as unknown as { __mutuRefetchReload?: () => void }
+  if (w.__mutuRefetchReload) w.__mutuRefetchReload()
+  else window.location.reload()
+}
+
 export async function hardRefresh() {
   try {
     if ('serviceWorker' in navigator) {
@@ -15,7 +22,7 @@ export async function hardRefresh() {
       for (const k of await caches.keys()) await caches.delete(k)
     }
   } catch { /* yoksay */ }
-  window.location.reload()
+  safeReload()
 }
 
 function Shell({ children }: { children: ReactNode }) {
@@ -78,7 +85,7 @@ export class AppErrorBoundary extends Component<{ children: ReactNode }, { error
   }
   render() {
     if (this.state.error) {
-      return <BootErrorScreen kind="app" message={this.state.error.message} onRetry={() => window.location.reload()} />
+      return <BootErrorScreen kind="app" message={this.state.error.message} onRetry={safeReload} />
     }
     return this.props.children
   }

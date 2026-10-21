@@ -53,7 +53,7 @@ export default defineConfig({
       },
       injectManifest: {
         globPatterns: ['**/*.{js,css,html,png,svg,woff2}'],
-        globIgnores: ['**/icons/splash-*', '**/assets/pdf-*.js', '**/assets/import-*.js'],
+        globIgnores: ['**/icons/splash-*', '**/assets/pdf-*.js', '**/assets/pdf.worker*'],
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
       },
     }),
@@ -65,7 +65,6 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           if (id.includes('pdfmake')) return 'pdf'
-          if (id.includes('pdfjs-dist') || id.includes('read-excel-file')) return 'import'
           if (id.includes('@supabase')) return 'supabase'
           if (id.includes('react-dom') || id.includes('react-router')) return 'react'
         },

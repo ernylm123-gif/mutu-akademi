@@ -18,8 +18,9 @@ interface Row extends ParsedRow {
 type Status = { tone: 'green' | 'amber' | 'red' | 'slate'; label: string; ok: boolean }
 
 async function extractPdfText(file: File): Promise<string> {
-  const pdfjs = await import('pdfjs-dist')
-  const worker = (await import('pdfjs-dist/build/pdf.worker.min.mjs?url')).default
+  // "legacy" derleme: iOS 18.4 öncesi Safari'de olmayan Iterator vb. API'ler için polyfill içerir
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs')
+  const worker = (await import('pdfjs-dist/legacy/build/pdf.worker.min.mjs?url')).default
   pdfjs.GlobalWorkerOptions.workerSrc = worker
   const doc = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise
   const lines: string[] = []
