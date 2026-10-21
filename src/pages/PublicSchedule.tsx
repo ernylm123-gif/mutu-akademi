@@ -96,34 +96,63 @@ export function PublicSchedulePage() {
   loadRef.current = async () => { await Promise.all([load(), loadExtras().catch(() => undefined)]) }
   useEffect(() => {
     let wasLive = false
+    let isLive = false
+    let disposed = false
     let timer: ReturnType<typeof setTimeout> | null = null
-    const ch = publicClient
-      .channel('public-schedule')
-      .on('broadcast', { event: 'changed' }, () => {
-        if (timer) clearTimeout(timer)
-        timer = setTimeout(() => void loadRef.current(), 250)
-      })
-      .subscribe((s) => {
+    let retry: ReturnType<typeof setTimeout> | null = null
+    let ch: ReturnType<typeof publicClient.channel> | null = null
+    // Kanal kopunca (internet kesintisi, iPhone'da arka plana alma) baştan kurulur
+    const connect = () => {
+      if (disposed) return
+      const c = publicClient
+        .channel('public-schedule')
+        .on('broadcast', { event: 'changed' }, () => {
+          if (timer) clearTimeout(timer)
+          timer = setTimeout(() => void loadRef.current(), 250)
+        })
+      ch = c
+      c.subscribe((s) => {
+        if (disposed || ch !== c) return
         if (s === 'SUBSCRIBED') {
           if (wasLive) void loadRef.current() // yeniden bağlandı: kaçırılan değişiklikleri al
           wasLive = true
+          isLive = true
           setLive('live')
         } else if (s === 'CHANNEL_ERROR' || s === 'TIMED_OUT' || s === 'CLOSED') {
+          isLive = false
           setLive(navigator.onLine ? 'connecting' : 'offline')
+          if (navigator.onLine && !retry) retry = setTimeout(reconnect, 3000)
         }
       })
-    const onOnline = () => { setLive('connecting'); void loadRef.current() }
-    const onOffline = () => setLive('offline')
-    const onVisible = () => { if (document.visibilityState === 'visible') void loadRef.current() }
+    }
+    const reconnect = () => {
+      if (retry) { clearTimeout(retry); retry = null }
+      if (disposed) return
+      const old = ch
+      ch = null
+      isLive = false
+      if (old) void publicClient.removeChannel(old).then(connect, connect)
+      else connect()
+    }
+    connect()
+    const onOnline = () => { setLive('connecting'); void loadRef.current(); reconnect() }
+    const onOffline = () => { isLive = false; setLive('offline') }
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return
+      void loadRef.current()
+      if (!isLive) reconnect()
+    }
     window.addEventListener('online', onOnline)
     window.addEventListener('offline', onOffline)
     document.addEventListener('visibilitychange', onVisible)
     return () => {
+      disposed = true
       if (timer) clearTimeout(timer)
+      if (retry) clearTimeout(retry)
       window.removeEventListener('online', onOnline)
       window.removeEventListener('offline', onOffline)
       document.removeEventListener('visibilitychange', onVisible)
-      void publicClient.removeChannel(ch)
+      if (ch) void publicClient.removeChannel(ch)
     }
   }, [])
 

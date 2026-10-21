@@ -55,31 +55,51 @@ export function useRealtimeSync(userId: string | undefined) {
       touch()
     }
 
-    let channel = supabase.channel(`db-sync-${userId}`)
-    for (const table of Object.keys(TABLE_KEYS)) {
-      channel = channel.on('postgres_changes', { event: '*', schema: 'public', table }, () => {
-        for (const k of TABLE_KEYS[table]) pending.add(k)
-        if (!timer) timer = setTimeout(flush, 120) // ani toplu değişiklikleri birleştir
+    // Kanal kopunca (internet kesintisi, iPhone'da uygulamanın arka plana alınması) baştan kurulur
+    let channel: ReturnType<typeof supabase.channel> | null = null
+    let retry: ReturnType<typeof setTimeout> | null = null
+    const connect = () => {
+      if (disposed) return
+      let ch = supabase.channel(`db-sync-${userId}-${Date.now()}`)
+      for (const table of Object.keys(TABLE_KEYS)) {
+        ch = ch.on('postgres_changes', { event: '*', schema: 'public', table }, () => {
+          for (const k of TABLE_KEYS[table]) pending.add(k)
+          if (!timer) timer = setTimeout(flush, 120) // ani toplu değişiklikleri birleştir
+        })
+      }
+      channel = ch
+      ch.subscribe((s) => {
+        if (disposed || channel !== ch) return
+        if (s === 'SUBSCRIBED') {
+          if (wasLive) revalidateAll() // yeniden bağlandı: kaçırılan değişiklikleri al
+          wasLive = true
+          setStatus('live')
+        } else if (s === 'CHANNEL_ERROR' || s === 'TIMED_OUT' || s === 'CLOSED') {
+          setStatus(navigator.onLine ? 'reconnecting' : 'offline')
+          if (navigator.onLine && !retry) retry = setTimeout(reconnect, 3000)
+        }
       })
     }
-    channel.subscribe((s) => {
+    const reconnect = () => {
+      if (retry) { clearTimeout(retry); retry = null }
       if (disposed) return
-      if (s === 'SUBSCRIBED') {
-        if (wasLive) revalidateAll() // yeniden bağlandı: kaçırılan değişiklikleri al
-        wasLive = true
-        setStatus('live')
-      } else if (s === 'CHANNEL_ERROR' || s === 'TIMED_OUT' || s === 'CLOSED') {
-        setStatus(navigator.onLine ? 'reconnecting' : 'offline')
-      }
-    })
+      const old = channel
+      channel = null
+      if (old) void supabase.removeChannel(old)
+      connect()
+    }
+    connect()
 
     const onOnline = () => {
       setStatus('reconnecting')
       revalidateAll()
+      reconnect()
     }
     const onOffline = () => setStatus('offline')
     const onVisible = () => {
-      if (document.visibilityState === 'visible') revalidateAll()
+      if (document.visibilityState !== 'visible') return
+      revalidateAll()
+      if (status !== 'live') reconnect()
     }
     window.addEventListener('online', onOnline)
     window.addEventListener('offline', onOffline)
@@ -88,10 +108,11 @@ export function useRealtimeSync(userId: string | undefined) {
     return () => {
       disposed = true
       if (timer) clearTimeout(timer)
+      if (retry) clearTimeout(retry)
       window.removeEventListener('online', onOnline)
       window.removeEventListener('offline', onOffline)
       document.removeEventListener('visibilitychange', onVisible)
-      void supabase.removeChannel(channel)
+      if (channel) void supabase.removeChannel(channel)
     }
   }, [userId, qc])
 }
