@@ -2,9 +2,8 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Sun, Moon, Monitor, BookOpen, Plus, Share, PlusSquare, MoreVertical, Download, CheckCircle2, ShieldCheck } from 'lucide-react'
+import { BookOpen, Plus, Share, PlusSquare, MoreVertical, Download, CheckCircle2, ShieldCheck } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
-import { useTheme, type ThemePref } from '@/hooks/useTheme'
 import { useCourses, useSettings, useAuditLogs, useProfiles, useDbMutation, insertRow } from '@/lib/api'
 import { supabase } from '@/lib/supabase'
 import { courseSchema, type CourseFormInput, type CourseFormValues } from '@/lib/schemas'
@@ -20,7 +19,6 @@ import { NotificationSettings } from '@/components/NotificationSettings'
 // ---------------------------------------------------------------------------
 export function SettingsPage() {
   const { profile, can, refreshProfile } = useAuth()
-  const { pref, setPref } = useTheme()
   const { data: settings } = useSettings()
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
@@ -44,20 +42,9 @@ export function SettingsPage() {
     if (!data) throw new Error('Ayarlar kaydedilemedi.')
   }, { success: 'Kurallar güncellendi; ders hakları yeniden hesaplandı', invalidate: ['settings', 'students'] })
 
-  const themes: { v: ThemePref; label: string; icon: typeof Sun }[] = [
-    { v: 'light', label: 'Açık', icon: Sun }, { v: 'dark', label: 'Koyu', icon: Moon }, { v: 'system', label: 'Sistem', icon: Monitor },
-  ]
   return (
     <div>
       <PageHeader title="Ayarlar" />
-      <SectionTitle>Görünüm</SectionTitle>
-      <div className="grid grid-cols-3 gap-2">
-        {themes.map((t) => (
-          <button key={t.v} onClick={() => setPref(t.v)} className={`card flex flex-col items-center gap-2 p-4 text-sm font-semibold ${pref === t.v ? 'ring-2 ring-brand-500' : ''}`}>
-            <t.icon className="size-5" /> {t.label}
-          </button>
-        ))}
-      </div>
       <SectionTitle>Bildirimler</SectionTitle>
       <Link to="/bildirim-ayarlari" className="card flex min-h-[56px] items-center justify-between px-4 font-semibold">Bildirim ayarları ve ders hatırlatmaları<span className="text-slate-400">›</span></Link>
       <SectionTitle>Profil</SectionTitle>

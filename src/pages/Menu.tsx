@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { GraduationCap, Wallet, BarChart3, UserCog, Settings, BookOpen, ShieldCheck, LogOut, ChevronRight, Smartphone, Radio, BellRing, Upload } from 'lucide-react'
+import { Users, GraduationCap, Wallet, BarChart3, UserCog, Settings, BookOpen, ShieldCheck, LogOut, ChevronRight, Smartphone, Radio, BellRing, Upload } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { ROLE_LABEL } from '@/lib/format'
 import { Avatar, Card } from '@/components/ui'
@@ -8,6 +8,7 @@ export function MenuPage() {
   const { profile, can, signOut } = useAuth()
   const navigate = useNavigate()
   const items = [
+    { to: '/ogrenciler', label: 'Öğrenciler', desc: 'Öğrenci kayıtları, haklar ve geçmiş', icon: Users, show: true, tone: 'bg-brand-50 text-brand-600' },
     { to: '/aktiviteler', label: 'Canlı Aktiviteler', desc: 'Tüm cihazlardaki işlemler, anında', icon: Radio, show: true, tone: 'bg-emerald-50 text-emerald-600' },
     { to: '/bildirim-ayarlari', label: 'Bildirim ayarları', desc: 'Ders hatırlatmaları ve sessiz saatler', icon: BellRing, show: true, tone: 'bg-accent-50 text-accent-600' },
     { to: '/program-yukle', label: 'Program yükle', desc: "Excel, CSV veya PDF'ten ders programı", icon: Upload, show: can.lessons, tone: 'bg-brand-50 text-brand-600' },

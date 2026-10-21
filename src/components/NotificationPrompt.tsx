@@ -52,10 +52,10 @@ export function NotificationPrompt({ mode = 'member' }: { mode?: PushMode }) {
         </div>
         <h2 className="mt-4 text-center text-xl font-extrabold tracking-tight">Ders Bildirimlerini Etkinleştir</h2>
         <p className="mt-2 text-center text-[15px] text-slate-600 dark:text-slate-300">
-          Ders başlangıçlarını, program değişikliklerini ve önemli akademi duyurularını zamanında takip edebilmek için bildirimlere izin verin.
+          Ders başlangıçlarından, program değişikliklerinden ve önemli akademi duyurularından zamanında haberdar olmak için bildirimleri etkinleştirin.
         </p>
         <p className="mt-3 rounded-2xl bg-slate-50 p-3 text-center text-sm text-slate-500 dark:bg-white/5">
-          Bildirimler, yaklaşan derslerin hatırlatılması ve günlük ders programının düzenli takibi için önerilir. Ders başlamadan 1 saat önce hatırlatma alırsınız.
+          Mutu Akademi, yaklaşan derslerinizi 1 saat önceden hatırlatarak günlük programınızı kolayca takip etmenize yardımcı olur.
         </p>
 
         {iosNotInstalled ? (

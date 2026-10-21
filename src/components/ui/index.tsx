@@ -122,10 +122,20 @@ export function Spinner({ className }: { className?: string }) {
   return <Loader2 className={clsx('size-5 animate-spin text-brand-600', className)} />
 }
 
-export function PageLoader() {
+/** Veri yüklenirken içerik iskeleti (boş dönen yükleme simgesi yerine) */
+export function PageLoader({ rows = 4 }: { rows?: number }) {
   return (
-    <div className="flex min-h-[40vh] items-center justify-center">
-      <Spinner className="size-7" />
+    <div className="space-y-2.5 py-2" aria-busy="true" aria-label="Yükleniyor">
+      {Array.from({ length: rows }, (_, i) => (
+        <div key={i} className="card flex items-center gap-3 p-3.5">
+          <span className="skeleton h-11 w-1.5" />
+          <span className="flex-1 space-y-2">
+            <span className="skeleton block h-3.5 w-1/3" />
+            <span className="skeleton block h-3 w-2/3" />
+          </span>
+          <span className="skeleton h-6 w-16 rounded-full" />
+        </div>
+      ))}
     </div>
   )
 }

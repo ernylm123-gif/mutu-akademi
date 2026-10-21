@@ -4,10 +4,19 @@ import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
 import { fileURLToPath, URL } from 'node:url'
 
+const APP_VERSION = process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? new Date().toISOString().slice(0, 19)
+
 export default defineConfig({
   resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
-  define: { __APP_VERSION__: JSON.stringify(process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? new Date().toISOString().slice(0, 16)) },
+  define: { __APP_VERSION__: JSON.stringify(APP_VERSION) },
   plugins: [
+    {
+      // Sunucudaki güncel sürüm: kurulu uygulamalar bunu önbelleksiz okuyup güncellenir
+      name: 'mutu-version-json',
+      generateBundle() {
+        this.emitFile({ type: 'asset', fileName: 'version.json', source: JSON.stringify({ version: APP_VERSION }) })
+      },
+    },
     react(),
     tailwindcss(),
     VitePWA({
@@ -28,7 +37,7 @@ export default defineConfig({
         scope: '/',
         display: 'standalone',
         display_override: ['standalone'],
-        orientation: 'portrait',
+        orientation: 'any',
         background_color: '#ffffff',
         theme_color: '#ffffff',
         categories: ['education', 'productivity'],

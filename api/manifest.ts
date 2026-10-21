@@ -20,7 +20,7 @@ export default function handler(req: { query?: Record<string, string | string[]>
     start_url: k ? `/#k=${k}` : '/?kaynak=pwa',
     scope: '/',
     display: 'standalone',
-    orientation: 'portrait',
+    orientation: 'any',
     background_color: '#ffffff',
     theme_color: '#ffffff',
     icons: [

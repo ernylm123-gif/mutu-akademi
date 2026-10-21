@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import clsx from 'clsx'
-import { ChevronLeft, ChevronRight, CalendarDays, Radio, WifiOff, RefreshCw, Lock, BellRing } from 'lucide-react'
+import { ChevronLeft, ChevronRight, CalendarDays, Radio, WifiOff, RefreshCw, Lock, BellRing, Activity, Megaphone, Send } from 'lucide-react'
 import { publicClient, type PublicLesson } from '@/lib/publicClient'
-import { addDays, dateKey, formatDayLong, fromIstanbul, startOfWeek, timeHM, WEEKDAYS } from '@/lib/time'
-import { Button, Card, EmptyState, Segmented, Spinner } from '@/components/ui'
+import { addDays, dateKey, formatDayLong, fromIstanbul, relativeTime, startOfWeek, timeHM, WEEKDAYS } from '@/lib/time'
+import { Button, Card, EmptyState, PageLoader, Segmented } from '@/components/ui'
 import { Countdown } from '@/components/Countdown'
 import { NotificationPrompt } from '@/components/NotificationPrompt'
 import { usePush } from '@/hooks/usePush'
@@ -26,6 +26,18 @@ const STATUS: Record<PublicLesson['status'], { label: string; cls: string }> = {
  * Oturum beklemeden açılır; yalnızca ders saati, kurs ve kısaltılmış isim gösterilir.
  * Değişiklikler Supabase Realtime yayınıyla anında gelir; yeniden bağlanınca sunucudan tekrar alınır.
  */
+type PublicActivity = { id: number; created_at: string; kind: string; course_name: string | null; starts_at: string | null; old_starts_at: string | null }
+type Announcement = { id: string; title: string; body: string; created_at: string }
+
+const ACT_TEXT: Record<string, string> = {
+  olusturuldu: 'yeni ders eklendi', kaldirildi: 'ders kaldırıldı', tamamlandi: 'ders tamamlandı', iptal: 'ders iptal edildi',
+  ertelendi: 'ders ertelendi', saat: 'ders saati değişti', basladi: 'ders başladı', program: 'haftalık program güncellendi', guncellendi: 'ders güncellendi',
+}
+function activityText(a: PublicActivity) {
+  const when = a.starts_at ? ` (${formatDayLong(dateKey(a.starts_at)).split(',')[0]} ${timeHM(a.starts_at)})` : ''
+  return `${a.course_name ?? 'Program'}: ${ACT_TEXT[a.kind] ?? 'güncellendi'}${a.kind === 'program' ? '' : when}`
+}
+
 export function PublicSchedulePage() {
   const today = dateKey()
   const [view, setView] = useState<View>('gun')
@@ -35,6 +47,17 @@ export function PublicSchedulePage() {
   const [error, setError] = useState<string | null>(null)
   const [live, setLive] = useState<Live>('connecting')
   const reqSeq = useRef(0)
+  const [activities, setActivities] = useState<PublicActivity[]>([])
+  const [announcements, setAnnouncements] = useState<Announcement[]>([])
+  // Herkese açık son hareketler ve duyurular (kişisel veri içermez); hata olursa sessizce eski liste kalır
+  const loadExtras = useCallback(async () => {
+    const [a, n] = await Promise.all([
+      publicClient.rpc('get_public_activities', { p_limit: 8 }),
+      publicClient.rpc('get_public_announcements', { p_limit: 3 }),
+    ])
+    if (!a.error) setActivities((a.data as PublicActivity[]) ?? [])
+    if (!n.error) setAnnouncements((n.data as Announcement[]) ?? [])
+  }, [])
 
   const [from, to] = useMemo(() => {
     if (view === 'gun') return [cursor, addDays(cursor, 1)]
@@ -66,10 +89,11 @@ export function PublicSchedulePage() {
     setLoading(true)
     void load()
   }, [load])
+  useEffect(() => { void loadExtras().catch(() => undefined) }, [loadExtras])
 
   // Gerçek zamanlı: kişisel veri taşımayan "program değişti" yayını
-  const loadRef = useRef(load)
-  loadRef.current = load
+  const loadRef = useRef(async () => { await Promise.all([load(), loadExtras().catch(() => undefined)]) })
+  loadRef.current = async () => { await Promise.all([load(), loadExtras().catch(() => undefined)]) }
   useEffect(() => {
     let wasLive = false
     let timer: ReturnType<typeof setTimeout> | null = null
@@ -147,6 +171,17 @@ export function PublicSchedulePage() {
           </div>
         </div>
 
+        {announcements.map((a) => (
+          <Card key={a.id} className="mt-4 flex gap-3 border-brand-100 bg-brand-50/60 p-4">
+            <span className="grid size-10 shrink-0 place-items-center rounded-2xl bg-white text-brand-600"><Megaphone className="size-5" /></span>
+            <span className="min-w-0 flex-1 text-sm">
+              <b className="block">{a.title}</b>
+              <span className="block whitespace-pre-line text-slate-600">{a.body}</span>
+              <span className="mt-1 block text-xs text-slate-400">{relativeTime(a.created_at)}</span>
+            </span>
+          </Card>
+        ))}
+
         {next && (
           <div className="brand-gradient mt-4 rounded-[1.5rem] p-5 text-white shadow-lg shadow-brand-600/15">
             <p className="text-xs font-semibold uppercase tracking-wider opacity-80">Sıradaki ders · <Countdown to={next.starts_at} /></p>
@@ -163,7 +198,7 @@ export function PublicSchedulePage() {
         )}
 
         {loading ? (
-          <div className="grid place-items-center py-16"><Spinner className="size-7" /></div>
+          <div className="mt-4"><PageLoader /></div>
         ) : (
           <div className="mt-4 space-y-5">
             {days.map((d) => {
@@ -201,6 +236,20 @@ export function PublicSchedulePage() {
           </div>
         )}
 
+        {activities.length > 0 && (
+          <section className="mt-8">
+            <h2 className="mb-2 flex items-center gap-1.5 px-1 text-xs font-bold uppercase tracking-wide text-slate-500"><Activity className="size-3.5" /> Son hareketler</h2>
+            <Card className="divide-y divide-slate-100 px-4">
+              {activities.map((a) => (
+                <p key={a.id} className="flex items-start justify-between gap-3 py-2.5 text-sm">
+                  <span className="min-w-0">{activityText(a)}</span>
+                  <span className="shrink-0 text-xs text-slate-400">{relativeTime(a.created_at)}</span>
+                </p>
+              ))}
+            </Card>
+          </section>
+        )}
+
         <PublicPushCard />
 
         <p className="mt-8 flex items-center justify-center gap-1.5 text-center text-xs text-slate-400">
@@ -216,7 +265,28 @@ export function PublicSchedulePage() {
 function PublicPushCard() {
   const push = usePush(undefined, 'public')
   const toast = useToast()
-  if (!push.checked || !push.support.ok || push.subscribed || push.permission === 'denied') return null
+  const [testing, setTesting] = useState(false)
+  if (!push.checked || !push.support.ok || push.permission === 'denied') return null
+  if (push.subscribed) {
+    const sendTest = async () => {
+      setTesting(true)
+      try {
+        const reg = await navigator.serviceWorker.ready
+        const sub = await reg.pushManager.getSubscription()
+        if (!sub) throw new Error('Bu cihazda bildirim aboneliği bulunamadı.')
+        const { error } = await publicClient.rpc('send_public_test_push', { p_endpoint: sub.endpoint })
+        if (error) throw error
+        toast.success('Test bildirimi gönderildi. Birkaç saniye içinde gelmesi gerekir.')
+      } catch (e) { toast.error(errorMessage(e)) } finally { setTesting(false) }
+    }
+    return (
+      <Card className="mt-6 flex items-center gap-3 p-4">
+        <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-emerald-50 text-emerald-600"><BellRing className="size-5" /></span>
+        <span className="flex-1 text-sm"><b className="block">Bildirimler açık</b><span className="text-slate-500">Dersten 1 saat önce hatırlatma alacaksınız.</span></span>
+        <Button size="sm" variant="secondary" loading={testing} icon={<Send className="size-4" />} onClick={sendTest}>Test et</Button>
+      </Card>
+    )
+  }
   return (
     <Card className="mt-6 flex items-center gap-3 p-4">
       <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-brand-50 text-brand-600 dark:bg-brand-500/15"><BellRing className="size-5" /></span>

@@ -240,7 +240,7 @@ export function LessonRow({ lesson, onClick, showDate, showAttendance = true }: 
           <span className={clsx('block truncate font-semibold', (lesson.status === 'iptal' || lesson.status === 'ertelendi') && 'text-slate-400 line-through')}>
             {lesson.student?.full_name ?? 'Öğrenci'}
           </span>
-          <span className="block truncate text-xs text-slate-500">{lesson.course?.name ?? '—'} · {lesson.instructor?.full_name ?? 'Eğitmen yok'}</span>
+          <span className="block truncate text-xs text-slate-500">{lesson.course?.name ?? '—'} · {lesson.instructor?.full_name ?? 'Eğitmen yok'}{lesson.student ? ` · ${lesson.student.remaining_lessons} hak` : ''}</span>
         </span>
         <span className="flex flex-col items-end gap-1">
           {att ? <Badge tone={att.tone}>{att.label}</Badge> : <Badge tone={st.tone}>{st.label}</Badge>}

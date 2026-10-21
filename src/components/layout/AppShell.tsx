@@ -3,7 +3,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import clsx from 'clsx'
 import {
   Bell, CalendarDays, Home, Menu as MenuIcon, Users, GraduationCap, Wallet, BarChart3, UserCog, Settings,
-  BookOpen, ShieldCheck, LogOut, WifiOff, RefreshCw, Smartphone, Radio,
+  BookOpen, BookOpenCheck, ShieldCheck, LogOut, WifiOff, RefreshCw, Smartphone, Radio,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useNotifications, rpc } from '@/lib/api'
@@ -46,10 +46,11 @@ export function AppShell() {
   const main = [
     { to: '/', label: 'Ana Sayfa', icon: Home, end: true },
     { to: '/takvim', label: 'Takvim', icon: CalendarDays },
-    { to: '/ogrenciler', label: 'Öğrenciler', icon: Users },
+    { to: '/dersler', label: 'Dersler', icon: BookOpenCheck },
     { to: '/bildirimler', label: 'Bildirimler', icon: Bell, badge: unread },
   ]
   const more = [
+    { to: '/ogrenciler', label: 'Öğrenciler', icon: Users, show: true },
     { to: '/aktiviteler', label: 'Canlı Aktiviteler', icon: Radio, show: true },
     { to: '/egitmenler', label: 'Eğitmenler', icon: GraduationCap, show: can.staff },
     { to: '/odemeler', label: 'Ödemeler', icon: Wallet, show: can.payments },

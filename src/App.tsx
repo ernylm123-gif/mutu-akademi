@@ -29,6 +29,7 @@ const LessonDetailPage = lazy(() => import('@/pages/LessonDetail').then((m) => (
 const ActivitiesPage = lazy(() => import('@/pages/Activities').then((m) => ({ default: m.ActivitiesPage })))
 const ScheduleImportPage = lazy(() => import('@/pages/ScheduleImport').then((m) => ({ default: m.ScheduleImportPage })))
 const NotificationSettingsPage = lazy(() => import('@/pages/Misc').then((m) => ({ default: m.NotificationSettingsPage })))
+const LessonsPage = lazy(() => import('@/pages/Lessons').then((m) => ({ default: m.LessonsPage })))
 const InstallPage = lazy(() => import('@/pages/Misc').then((m) => ({ default: m.InstallPage })))
 
 function Guard({ allow, children }: { allow: boolean; children: ReactNode }) {
@@ -66,6 +67,7 @@ function Protected() {
         <Route element={<AppShell />}>
           <Route index element={<DashboardPage />} />
           <Route path="takvim" element={<CalendarPage />} />
+          <Route path="dersler" element={<LessonsPage />} />
           <Route path="ogrenciler" element={<StudentsPage />} />
           <Route path="ogrenciler/:id" element={<StudentDetailPage />} />
           <Route path="bildirimler" element={<NotificationsPage />} />

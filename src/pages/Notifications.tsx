@@ -1,14 +1,14 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { usePush } from '@/hooks/usePush'
 import clsx from 'clsx'
-import { Bell, BellRing, Settings2, CheckCheck, UserPlus, CalendarClock, Ban, UserX, AlertTriangle, Wallet } from 'lucide-react'
+import { Bell, BellRing, Settings2, CheckCheck, UserPlus, CalendarClock, Ban, UserX, AlertTriangle, Wallet, Megaphone } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useNotifications, useDbMutation, rpc } from '@/lib/api'
 import { supabase } from '@/lib/supabase'
 import { relativeTime } from '@/lib/time'
 import type { AppNotification } from '@/types/db'
-import { Button, Card, EmptyState, PageLoader } from '@/components/ui'
+import { Button, Card, EmptyState, Input, PageLoader, Textarea } from '@/components/ui'
 import { PageHeader } from '@/components/layout/AppShell'
 
 const ICONS: Record<string, { icon: typeof Bell; cls: string }> = {
@@ -18,6 +18,7 @@ const ICONS: Record<string, { icon: typeof Bell; cls: string }> = {
   devamsizlik: { icon: UserX, cls: 'bg-accent-50 text-accent-600 dark:bg-accent-500/15' },
   dusuk_ders_hakki: { icon: AlertTriangle, cls: 'bg-amber-50 text-amber-600 dark:bg-amber-500/15' },
   yaklasan_odeme: { icon: Wallet, cls: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15' },
+  duyuru: { icon: Megaphone, cls: 'bg-brand-50 text-brand-600' },
   gecikmis_odeme: { icon: Wallet, cls: 'bg-red-50 text-red-600 dark:bg-red-500/15' },
 }
 
@@ -55,6 +56,7 @@ export function NotificationsPage() {
           {unread > 0 && <Button variant="secondary" size="sm" icon={<CheckCheck className="size-4" />} loading={markAll.isPending} onClick={() => markAll.mutate(undefined)}>Tümünü okundu yap</Button>}
           <Link to="/bildirim-ayarlari" className="grid size-11 place-items-center rounded-2xl border border-slate-200 text-slate-600 dark:border-white/10 dark:text-slate-300" aria-label="Bildirim ayarları"><Settings2 className="size-5" /></Link>
         </>} />
+      {can.admin && <AnnouncementCard />}
       {!push.subscribed && (
         <Link to="/bildirim-ayarlari" className="card mb-4 flex items-center gap-3 p-4">
           <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-brand-50 text-brand-600 dark:bg-brand-500/15"><BellRing className="size-5" /></span>
@@ -85,5 +87,24 @@ export function NotificationsPage() {
         </Card>
       )}
     </div>
+  )
+}
+
+/** Yönetici duyurusu: tüm yetkili cihazlara ve herkese açık bildirim abonelerine gider */
+export function AnnouncementCard() {
+  const [title, setTitle] = useState('')
+  const [body, setBody] = useState('')
+  const send = useDbMutation(async () => {
+    await rpc('send_announcement', { p_title: title, p_body: body })
+    setTitle(''); setBody('')
+  }, { success: 'Duyuru gönderildi', invalidate: ['notifications'] })
+  const ok = title.trim().length >= 3 && body.trim().length >= 3
+  return (
+    <Card className="mb-4 space-y-2.5 p-4">
+      <p className="flex items-center gap-2 text-sm font-bold"><Megaphone className="size-4 text-brand-600" /> Duyuru gönder</p>
+      <Input placeholder="Başlık" maxLength={80} value={title} onChange={(e) => setTitle(e.target.value)} />
+      <Textarea placeholder="Duyuru metni" maxLength={500} rows={3} value={body} onChange={(e) => setBody(e.target.value)} />
+      <Button className="w-full" disabled={!ok} loading={send.isPending} onClick={() => send.mutate(undefined)}>Gönder</Button>
+    </Card>
   )
 }
