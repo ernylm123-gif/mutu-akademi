@@ -107,7 +107,8 @@ export function DeviceGate({ linkKey }: { linkKey: string | null }) {
         <p className="mt-2 text-sm text-slate-500">Mutu Akademi'yi kullanmak için yöneticinizden bu cihaza özel, tek kullanımlık bağlantıyı isteyin ve bu cihazda açın. Bir kez açtıktan sonra uygulama her seferinde doğrudan açılır.</p>
       )}
       {error && <Button variant="secondary" className="mt-4" icon={<RefreshCw className="size-4" />} onClick={() => window.location.reload()}>Yeniden dene</Button>}
-      <p className="mt-6 flex items-start gap-2 rounded-2xl bg-slate-50 p-3 text-left text-xs text-slate-500 dark:bg-white/5">
+      <a href="/" className="mt-4 inline-flex min-h-[44px] items-center text-sm font-semibold text-brand-600">← Ortak ders programına dön</a>
+      <p className="mt-4 flex items-start gap-2 rounded-2xl bg-slate-50 p-3 text-left text-xs text-slate-500 dark:bg-white/5">
         <ShieldCheck className="mt-0.5 size-4 shrink-0 text-brand-600" />
         Öğrenci, veli ve ödeme bilgileri yalnızca yetkilendirilmiş cihazlarda görünür.
       </p>

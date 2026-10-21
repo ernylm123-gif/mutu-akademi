@@ -6,15 +6,25 @@ const SUPABASE_URL = process.env.E2E_SUPABASE_URL
 const SUPABASE_KEY = process.env.E2E_SUPABASE_KEY // herkese açık (publishable) anahtar
 
 test.describe('herkese açık sayfalar', () => {
-  test('yetkisiz cihaz giriş/şifre/kod formu görmez, veri görmez', async ({ page }) => {
-    await page.goto('/ogrenciler')
+  test('ana adres girişsiz olarak doğrudan ortak ders programını açar', async ({ page }) => {
+    const t0 = Date.now()
+    await page.goto('/')
+    await expect(page.getByRole('heading', { name: 'Ders Programı' })).toBeVisible({ timeout: 10_000 })
+    expect(Date.now() - t0).toBeLessThan(10_000)
+    await expect(page.locator('input')).toHaveCount(0)
+    await expect(page.getByText(/Program alınamadı/)).toHaveCount(0, { timeout: 15_000 })
+    await expect(page.getByText('Canlı', { exact: true })).toBeVisible({ timeout: 15_000 })
+  })
+
+  test('yönetim alanı yetkisiz cihaza veri göstermez', async ({ page }) => {
+    await page.goto('/yonetim')
     await expect(page.getByRole('heading', { name: 'Bu cihaz yetkili değil' })).toBeVisible()
     await expect(page.locator('input')).toHaveCount(0)
     await expect(page.getByLabel('Şifre')).toHaveCount(0)
     await expect(page.getByText('MUTU AKADEMİ').first()).toBeVisible()
   })
 
-  test('süresi dolmuş/geçersiz oturumla açılış takılmaz, yetkisiz ekranına düşer', async ({ page }) => {
+  test('süresi dolmuş/geçersiz oturumla açılış takılmaz', async ({ page }) => {
     await page.addInitScript(() => {
       localStorage.setItem('mutu-akademi-auth', JSON.stringify({
         access_token: 'gecersiz.jwt.token', refresh_token: 'gecersiz-yenileme', token_type: 'bearer',
@@ -24,19 +34,21 @@ test.describe('herkese açık sayfalar', () => {
     })
     const t0 = Date.now()
     await page.goto('/')
-    await expect(page.getByRole('heading', { name: /Bu cihaz yetkili değil|Sunucuya bağlanılamadı|Sunucu hatası/ })).toBeVisible({ timeout: 20_000 })
+    await expect(page.getByRole('heading', { name: 'Ders Programı' })).toBeVisible({ timeout: 10_000 })
     expect(Date.now() - t0).toBeLessThan(20_000)
   })
 
-  test('yetkili açılış sonrası hiçbir giriş formu yok; yükleme ekranı sonsuz değil', async ({ page }) => {
-    await page.goto('/')
-    await expect(page.getByRole('heading', { name: 'Bu cihaz yetkili değil' })).toBeVisible({ timeout: 15_000 })
-    await expect(page.getByText('Açılış beklenenden uzun sürdü')).toHaveCount(0)
+  test('ortak programda telefon veya ödeme bilgisi bulunmaz', async ({ page }) => {
+    await page.goto('/?gorunum=hafta')
+    await page.getByRole('button', { name: 'Hafta' }).click()
+    await page.waitForTimeout(2000)
+    const text = await page.locator('main').innerText()
+    expect(text).not.toMatch(/0\s?5\d{2}[\s-]?\d{3}|₺|veli/i)
   })
 
   test('ders detay bağlantısı (bildirimden) yetkisiz cihazda veri göstermez', async ({ page }) => {
     await page.goto('/ders/00000000-0000-0000-0000-000000000000')
-    await expect(page.getByRole('heading', { name: 'Bu cihaz yetkili değil' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Ders Programı' })).toBeVisible()
   })
 
 
@@ -98,6 +110,15 @@ test.describe('veritabanı güvenliği (herkese açık anahtarla, oturumsuz)', (
   test('push gönderim kuyruğu yanlış anahtarla alınamaz', async ({ request }) => {
     const r = await request.post(`${SUPABASE_URL}/rest/v1/rpc/claim_push_batch`, { headers: h(), data: { p_secret: 'x'.repeat(64) } })
     expect(r.status()).toBeGreaterThanOrEqual(400)
+  })
+
+  test('ortak program fonksiyonu girişsiz çalışır ve kişisel veri döndürmez', async ({ request }) => {
+    const from = new Date(Date.now() - 86400000).toISOString()
+    const to = new Date(Date.now() + 14 * 86400000).toISOString()
+    const r = await request.post(`${SUPABASE_URL}/rest/v1/rpc/get_public_schedule`, { headers: h(), data: { p_from: from, p_to: to } })
+    expect(r.status()).toBe(200)
+    const body = await r.text()
+    expect(body).not.toMatch(/phone|guardian|notes|amount|0\s?5\d{2}/i)
   })
 
   test('aktiviteler ve cihaz eşleştirme oturumsuz çağrılamaz', async ({ request }) => {

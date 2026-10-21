@@ -16,6 +16,16 @@ export function usePwaUpdate() {
   useEffect(() => {
     if (!('serviceWorker' in navigator) || import.meta.env.DEV) return
     let reg: ServiceWorkerRegistration | undefined
+    // Yeni Service Worker kontrolü devraldığında (yeni sürüm) açık formu bozmadan bir kez yenile
+    const hadController = !!navigator.serviceWorker.controller
+    let reloaded = false
+    const onControllerChange = () => {
+      if (!hadController || reloaded) return
+      if (document.querySelector('[role="dialog"]')) { setNeedRefresh(true); return }
+      reloaded = true
+      window.location.reload()
+    }
+    navigator.serviceWorker.addEventListener('controllerchange', onControllerChange)
     const update = registerSW({
       immediate: true,
       onNeedRefresh() {
@@ -37,6 +47,7 @@ export function usePwaUpdate() {
     }
     document.addEventListener('visibilitychange', onVis)
     return () => {
+      navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange)
       clearInterval(interval)
       document.removeEventListener('visibilitychange', onVis)
     }

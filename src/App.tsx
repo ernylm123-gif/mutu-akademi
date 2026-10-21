@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import { PublicSchedulePage } from '@/pages/PublicSchedule'
 import { useAuth } from '@/hooks/useAuth'
 import { supabaseConfigured } from '@/lib/supabase'
 import { clearLinkKey, readLinkKey } from '@/lib/pairing'
@@ -43,16 +44,21 @@ function Protected() {
     if (authorized && linkKey) clearLinkKey()
   }, [authorized, linkKey])
 
-  // Açılış her zaman sonlanır: yükleniyor (süre sınırlı) → yetkili / yetkisiz / hata
-  if (loading) return <BootLoader onRetry={() => void retry()} />
+  const location = useLocation()
+  const wantsAdmin = location.pathname.startsWith('/yonetim')
+
+  // Açılış ASLA oturum beklemez: yetkili olmayan / henüz doğrulanmamış her cihaz anında ortak programı görür.
   if (authorized) {
-    // yetkili: uygulama (aşağıda)
-  } else if (bootError) {
-    return <BootErrorScreen kind={bootError.kind} message={bootError.message} onRetry={() => void retry()} />
-  } else if (profile?.approved && !profile.is_active) {
-    return <PendingApprovalPage />
-  } else {
+    // yetkili cihaz: tam yönetim uygulaması (aşağıda)
+  } else if (linkKey) {
     return <DeviceGate linkKey={linkKey} />
+  } else if (wantsAdmin) {
+    if (loading) return <BootLoader onRetry={() => void retry()} />
+    if (bootError) return <BootErrorScreen kind={bootError.kind} message={bootError.message} onRetry={() => void retry()} />
+    if (profile?.approved && !profile.is_active) return <PendingApprovalPage />
+    return <DeviceGate linkKey={null} />
+  } else {
+    return <PublicSchedulePage />
   }
   return (
     <Suspense fallback={<PageLoader />}>

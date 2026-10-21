@@ -5,9 +5,13 @@
 // - Bildirime dokunulunca ilgili ekran (ör. ders detayı) açılır.
 import { cleanupOutdatedCaches, createHandlerBoundToURL, precacheAndRoute } from 'workbox-precaching'
 import { NavigationRoute, registerRoute } from 'workbox-routing'
+import { clientsClaim } from 'workbox-core'
 
 declare const self: ServiceWorkerGlobalScope
 
+// Yeni sürüm beklemeden devreye girer: eski kurulu uygulamalar bir sonraki açılışta mutlaka güncel sürümü alır
+void self.skipWaiting()
+clientsClaim()
 cleanupOutdatedCaches()
 precacheAndRoute(self.__WB_MANIFEST)
 registerRoute(new NavigationRoute(createHandlerBoundToURL('/index.html'), { denylist: [/^\/api\//] }))

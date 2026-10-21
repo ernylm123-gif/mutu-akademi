@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { publicClient } from '@/lib/publicClient'
 
 // Web Push yardımcıları. İzin YALNIZCA kullanıcı "Bildirimleri etkinleştir" butonuna bastığında istenir.
 const VAPID_PUBLIC = import.meta.env.VITE_VAPID_PUBLIC_KEY as string | undefined
@@ -40,8 +41,26 @@ function urlBase64ToUint8Array(base64: string) {
   return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)))
 }
 
-async function saveSubscription(sub: PushSubscription) {
+export type PushMode = 'member' | 'public'
+
+/** Service Worker hazır olmasını sınırlı süre bekler (asla sonsuz bekleme yok) */
+function swReady(ms = 10_000): Promise<ServiceWorkerRegistration> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error('Bildirim servisi başlatılamadı. Uygulamayı kapatıp yeniden açın.')), ms)
+    navigator.serviceWorker.ready.then((r) => { clearTimeout(t); resolve(r) }, (e) => { clearTimeout(t); reject(e) })
+  })
+}
+
+async function saveSubscription(sub: PushSubscription, mode: PushMode = 'member') {
   const json = sub.toJSON() as { endpoint: string; keys: { p256dh: string; auth: string } }
+  if (mode === 'public') {
+    // Girişsiz cihaz: yalnızca ders hatırlatmaları (kısaltılmış isimle)
+    const { error } = await publicClient.rpc('subscribe_public_push', {
+      p_endpoint: json.endpoint, p_p256dh: json.keys.p256dh, p_auth: json.keys.auth, p_ua: navigator.userAgent.slice(0, 300),
+    })
+    if (error) throw error
+    return
+  }
   const { data: existing } = await supabase.from('push_subscriptions').select('id').eq('endpoint', json.endpoint).maybeSingle()
   if (existing) return
   const { error } = await supabase.from('push_subscriptions').insert({
@@ -54,7 +73,7 @@ async function saveSubscription(sub: PushSubscription) {
   if (error && error.code !== '23505') throw error
 }
 
-export function usePush(userId: string | undefined) {
+export function usePush(userId: string | undefined, mode: PushMode = 'member') {
   const support = pushSupport()
   const [permission, setPermission] = useState<NotificationPermission | 'unsupported'>(
     'Notification' in window ? Notification.permission : 'unsupported',
@@ -64,19 +83,20 @@ export function usePush(userId: string | undefined) {
   const [checked, setChecked] = useState(false)
 
   const refresh = useCallback(async () => {
-    if (!support.ok || !userId) { setChecked(true); return }
-    const reg = await navigator.serviceWorker.ready
+    if (!support.ok || (mode === 'member' && !userId)) { setChecked(true); return }
+    const reg = await swReady().catch(() => null)
+    if (!reg) { setChecked(true); return }
     const sub = await reg.pushManager.getSubscription()
     setPermission(Notification.permission)
     if (sub && Notification.permission === 'granted') {
       // Abonelik tarayıcıda var ama sunucuda yoksa (ör. yenilendi) tekrar kaydet
-      await saveSubscription(sub).catch(() => undefined)
+      await saveSubscription(sub, mode).catch(() => undefined)
       setSubscribed(true)
     } else {
       setSubscribed(false)
     }
     setChecked(true)
-  }, [support.ok, userId])
+  }, [support.ok, userId, mode])
 
   useEffect(() => {
     void refresh()
@@ -95,31 +115,32 @@ export function usePush(userId: string | undefined) {
       const perm = await Notification.requestPermission()
       setPermission(perm)
       if (perm !== 'granted') throw new Error('Bildirim izni verilmedi. Cihaz ayarlarından Mutu Akademi için bildirimlere izin verebilirsiniz.')
-      const reg = await navigator.serviceWorker.ready
+      const reg = await swReady()
       const sub =
         (await reg.pushManager.getSubscription()) ??
         (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC!) }))
-      await saveSubscription(sub)
+      await saveSubscription(sub, mode)
       setSubscribed(true)
     } finally {
       setBusy(false)
     }
-  }, [support])
+  }, [support, mode])
 
   const disable = useCallback(async () => {
     setBusy(true)
     try {
-      const reg = await navigator.serviceWorker.ready
+      const reg = await swReady()
       const sub = await reg.pushManager.getSubscription()
       if (sub) {
-        await supabase.from('push_subscriptions').delete().eq('endpoint', sub.endpoint)
+        if (mode === 'public') await publicClient.rpc('unsubscribe_public_push', { p_endpoint: sub.endpoint })
+        else await supabase.from('push_subscriptions').delete().eq('endpoint', sub.endpoint)
         await sub.unsubscribe()
       }
       setSubscribed(false)
     } finally {
       setBusy(false)
     }
-  }, [])
+  }, [mode])
 
   return { support, permission, subscribed, busy, checked, enable, disable, refresh }
 }

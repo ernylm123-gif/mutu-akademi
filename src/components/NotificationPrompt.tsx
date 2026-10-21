@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { BellRing, Share, PlusSquare } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
-import { usePush } from '@/hooks/usePush'
+import { usePush, type PushMode } from '@/hooks/usePush'
 import { errorMessage } from '@/lib/errors'
 import { Button } from '@/components/ui'
 import { useToast } from '@/components/ui/Toast'
@@ -21,9 +21,9 @@ function dismissedRecently() {
  * İlk açılışta gösterilen bildirim bilgilendirme ekranı.
  * Tarayıcı izin penceresi YALNIZCA "Bildirimleri Etkinleştir"e dokunulunca açılır.
  */
-export function NotificationPrompt() {
+export function NotificationPrompt({ mode = 'member' }: { mode?: PushMode }) {
   const { session } = useAuth()
-  const push = usePush(session?.user.id)
+  const push = usePush(session?.user.id, mode)
   const toast = useToast()
   const [hidden, setHidden] = useState(dismissedRecently)
 
