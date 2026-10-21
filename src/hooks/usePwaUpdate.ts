@@ -20,7 +20,8 @@ export function usePwaUpdate() {
       immediate: true,
       onNeedRefresh() {
         setNeedRefresh(true)
-        if (document.visibilityState === 'hidden') void update(true)
+        // Açık form/panel varken otomatik güncelleme yapma (kaydedilmemiş veri kaybolmasın)
+        if (document.visibilityState === 'hidden' && !document.querySelector('[role="dialog"]')) void update(true)
       },
       onRegisteredSW(_url, r) {
         reg = r

@@ -3,12 +3,11 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import clsx from 'clsx'
 import {
   Bell, CalendarDays, Home, Menu as MenuIcon, Users, GraduationCap, Wallet, BarChart3, UserCog, Settings,
-  BookOpen, ShieldCheck, LogOut, WifiOff, RefreshCw, Download, Smartphone, Radio,
+  BookOpen, ShieldCheck, LogOut, WifiOff, RefreshCw, Smartphone, Radio,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useNotifications, rpc } from '@/lib/api'
 import { useRealtimeSync, useSyncStatus } from '@/hooks/useRealtimeSync'
-import { usePwaUpdate } from '@/hooks/usePwaUpdate'
 import { ROLE_LABEL } from '@/lib/format'
 import { Avatar, Button } from '@/components/ui'
 import { Logo } from './Logo'
@@ -41,7 +40,6 @@ export function AppShell() {
     return () => navigator.serviceWorker.removeEventListener('message', onMsg)
   }, [navigate])
   const unread = useUnreadCount()
-  const { needRefresh, applyUpdate, dismiss } = usePwaUpdate()
   const loc = useLocation()
 
   const main = [
@@ -112,15 +110,6 @@ export function AppShell() {
       </header>
 
       <ConnectionBanner />
-      {needRefresh && (
-        <div className="no-print sticky top-0 z-40 flex items-center justify-between gap-3 bg-brand-600 px-4 py-2.5 text-sm text-white">
-          <span className="flex items-center gap-2"><Download className="size-4" /> Yeni sürüm hazır.</span>
-          <span className="flex gap-2">
-            <button onClick={dismiss} className="rounded-lg px-2 py-1 opacity-80">Sonra</button>
-            <button onClick={applyUpdate} className="rounded-lg bg-white px-3 py-1 font-semibold text-brand-700">Güncelle</button>
-          </span>
-        </div>
-      )}
 
       <main key={loc.pathname} className="fade-in pb-nav mx-auto w-full max-w-6xl px-4 pt-4 lg:px-8 lg:pb-10 lg:pt-8">
         <div className="mb-4 hidden justify-end lg:flex"><SyncDot /></div>

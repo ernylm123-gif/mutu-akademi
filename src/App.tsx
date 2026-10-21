@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
 import { supabaseConfigured } from '@/lib/supabase'
 import { AppShell } from '@/components/layout/AppShell'
+import { UpdateBanner } from '@/components/layout/UpdateBanner'
 import { PageLoader } from '@/components/ui'
 import { LoginPage, PairPage, RegisterPage, ForgotPasswordPage, UpdatePasswordPage, PendingApprovalPage, MissingConfigPage } from '@/pages/Auth'
 import { DashboardPage } from '@/pages/Dashboard'
@@ -77,6 +78,7 @@ export default function App() {
   if (!supabaseConfigured) return <MissingConfigPage />
   return (
     <BrowserRouter>
+      <UpdateBanner />
       <Routes>
         <Route path="/giris" element={<PublicOnly><LoginPage /></PublicOnly>} />
         <Route path="/eslestir" element={<PairPage />} />

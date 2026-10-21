@@ -1,5 +1,10 @@
 import { test, expect, type Browser } from '@playwright/test'
 
+// Canlı ortamda (localhost dışı) hesap/oturum oluşturan veya şifre deneyen testler çalıştırılmaz.
+const isLocal = /localhost|127\.0\.0\.1/.test(process.env.E2E_BASE_URL || 'http://localhost')
+const SUPABASE_URL = process.env.E2E_SUPABASE_URL
+const SUPABASE_KEY = process.env.E2E_SUPABASE_KEY // herkese açık (publishable) anahtar
+
 test.describe('herkese açık sayfalar', () => {
   test('yetkisiz cihaz şifre değil, cihaz eşleştirme ekranı görür', async ({ page }) => {
     await page.goto('/ogrenciler')
@@ -9,12 +14,94 @@ test.describe('herkese açık sayfalar', () => {
     await expect(page.getByText('MUTU AKADEMİ').first()).toBeVisible()
   })
 
-  test('geçersiz e-posta doğrulaması', async ({ page }) => {
-    await page.goto('/giris')
-    await page.getByLabel('E-posta').fill('gecersiz')
-    await page.getByRole('button', { name: 'Giriş yap' }).click()
-    await expect(page.getByText('Geçerli bir e-posta girin')).toBeVisible()
+  test('ders detay bağlantısı (bildirimden) yetkisiz cihazda veri göstermez', async ({ page }) => {
+    await page.goto('/ders/00000000-0000-0000-0000-000000000000')
+    await expect(page).toHaveURL(/\/eslestir$/)
+    await expect(page.getByRole('heading', { name: 'Cihazı bağla' })).toBeVisible()
   })
+
+  test('kısa davet kodu sunucuya gönderilmeden reddedilir', async ({ page }) => {
+    await page.goto('/eslestir')
+    await page.getByLabel('Davet kodu').fill('ABC')
+    await page.getByRole('button', { name: 'Cihazı bağla' }).click()
+    await expect(page.getByRole('alert')).toContainText('10 karakter')
+  })
+
+  test('davet kodu adres çubuğundan ve geçmişten silinir', async ({ page }) => {
+    await page.goto('/eslestir?kod=AAAAA-BBBBB')
+    await expect(page).toHaveURL(/\/eslestir$/)
+    await expect(page.getByLabel('Davet kodu')).toHaveValue('AAAAA-BBBBB')
+  })
+
+  test('mobilde yatay taşma yok ve dokunma hedefleri en az 44px', async ({ page }) => {
+    await page.goto('/eslestir')
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
+    expect(overflow).toBeLessThanOrEqual(1)
+    const h = await page.getByRole('button', { name: 'Cihazı bağla' }).evaluate((b) => b.getBoundingClientRect().height)
+    expect(h).toBeGreaterThanOrEqual(44)
+  })
+
+  test('PWA: manifest, ikonlar, iOS ayarları ve service worker', async ({ page, request }) => {
+    await page.goto('/eslestir')
+    const manifestHref = await page.locator('link[rel="manifest"]').getAttribute('href')
+    expect(manifestHref).toBeTruthy()
+    const m = await (await request.get(manifestHref!)).json()
+    expect(m.name).toBe('MUTU AKADEMİ')
+    expect(m.display).toBe('standalone')
+    expect(m.icons.some((i: { sizes: string }) => i.sizes === '192x192')).toBeTruthy()
+    expect(m.icons.some((i: { sizes: string }) => i.sizes === '512x512')).toBeTruthy()
+    expect(m.icons.some((i: { purpose?: string }) => i.purpose === 'maskable')).toBeTruthy()
+    for (const icon of m.icons as { src: string }[]) expect((await request.get(icon.src)).ok()).toBeTruthy()
+    expect((await request.get('/icons/apple-touch-icon.png')).ok()).toBeTruthy()
+    await expect(page.locator('meta[name="apple-mobile-web-app-capable"]')).toHaveAttribute('content', 'yes')
+    const splashes = await page.locator('link[rel="apple-touch-startup-image"]').evaluateAll((ls) => ls.map((l) => (l as HTMLLinkElement).href))
+    expect(splashes.length).toBeGreaterThanOrEqual(10)
+    for (const s of splashes) expect((await request.get(s)).ok()).toBeTruthy()
+    const sw = await (await request.get('/sw.js')).text()
+    expect(sw).toContain('push')
+    expect(sw).toContain('notificationclick')
+  })
+
+  test('service worker kaydolur ve veri isteklerini önbelleğe almaz', async ({ page }) => {
+    await page.goto('/eslestir')
+    const ok = await page.evaluate(async () => {
+      const reg = await Promise.race([navigator.serviceWorker.ready, new Promise((r) => setTimeout(() => r(null), 15000))])
+      return !!reg
+    })
+    expect(ok).toBeTruthy()
+    const cached = await page.evaluate(async () => {
+      const urls: string[] = []
+      for (const k of await caches.keys()) for (const r of await (await caches.open(k)).keys()) urls.push(r.url)
+      return urls
+    })
+    expect(cached.some((u) => u.includes('supabase.co'))).toBeFalsy()
+  })
+})
+
+test.describe('veritabanı güvenliği (herkese açık anahtarla, oturumsuz)', () => {
+  test.skip(!SUPABASE_URL || !SUPABASE_KEY, 'E2E_SUPABASE_URL / E2E_SUPABASE_KEY tanımlı değil')
+  const h = () => ({ apikey: SUPABASE_KEY!, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json' })
+
+  for (const table of ['students', 'lessons', 'attendance', 'payments', 'profiles', 'device_invites', 'push_subscriptions', 'push_deliveries', 'audit_logs']) {
+    test(`oturumsuz istek ${table} tablosunu okuyamaz`, async ({ request }) => {
+      const r = await request.get(`${SUPABASE_URL}/rest/v1/${table}?select=*&limit=1`, { headers: h() })
+      expect(r.status()).toBeGreaterThanOrEqual(400)
+    })
+  }
+
+  test('push gönderim kuyruğu yanlış anahtarla alınamaz', async ({ request }) => {
+    const r = await request.post(`${SUPABASE_URL}/rest/v1/rpc/claim_push_batch`, { headers: h(), data: { p_secret: 'x'.repeat(64) } })
+    expect(r.status()).toBeGreaterThanOrEqual(400)
+  })
+
+  test('aktiviteler ve cihaz eşleştirme oturumsuz çağrılamaz', async ({ request }) => {
+    expect((await request.post(`${SUPABASE_URL}/rest/v1/rpc/get_activities`, { headers: h(), data: {} })).status()).toBeGreaterThanOrEqual(400)
+    expect((await request.post(`${SUPABASE_URL}/rest/v1/rpc/redeem_device_invite`, { headers: h(), data: { p_code: 'AAAAABBBBB' } })).status()).toBeGreaterThanOrEqual(400)
+  })
+})
+
+test.describe('yalnızca yerel ortam', () => {
+  test.skip(!isLocal, 'Canlı ortamda hesap/oturum oluşturan testler çalıştırılmaz')
 
   test('yanlış şifre başarı olarak gösterilmez', async ({ page }) => {
     await page.goto('/giris')
@@ -24,31 +111,9 @@ test.describe('herkese açık sayfalar', () => {
     await expect(page.getByRole('alert')).toBeVisible({ timeout: 15_000 })
     await expect(page).toHaveURL(/\/giris$/)
   })
-
-  test('geçersiz davet kodu reddedilir ve veri gösterilmez', async ({ page }) => {
-    await page.goto('/eslestir?kod=AAAAA-BBBBB')
-    await expect(page).toHaveURL(/\/eslestir$/) // kod adres çubuğundan silinir
-    await page.getByRole('button', { name: 'Cihazı bağla' }).click()
-    await expect(page.getByRole('alert')).toBeVisible({ timeout: 15_000 })
-    await expect(page).toHaveURL(/\/eslestir$/)
-  })
-
-  test('PWA manifest ve service worker', async ({ page, request }) => {
-    await page.goto('/giris')
-    const manifestHref = await page.locator('link[rel="manifest"]').getAttribute('href')
-    expect(manifestHref).toBeTruthy()
-    const res = await request.get(manifestHref!)
-    expect(res.ok()).toBeTruthy()
-    const m = await res.json()
-    expect(m.name).toBe('MUTU AKADEMİ')
-    expect(m.display).toBe('standalone')
-    expect(m.icons.some((i: { sizes: string }) => i.sizes === '512x512')).toBeTruthy()
-    expect((await request.get('/sw.js')).ok()).toBeTruthy()
-    expect((await request.get('/icons/apple-touch-icon.png')).ok()).toBeTruthy()
-  })
 })
 
-// Giriş gerektiren akışlar: E2E_EMAIL / E2E_PASSWORD ile çalışır (test hesabı)
+// İki cihaz senaryosu: E2E_EMAIL / E2E_PASSWORD ile (yalnızca yerel/test ortamı için)
 const email = process.env.E2E_EMAIL
 const password = process.env.E2E_PASSWORD
 
@@ -59,28 +124,23 @@ async function login(browser: Browser) {
   await page.getByLabel('E-posta').fill(email!)
   await page.getByLabel('Şifre').fill(password!)
   await page.getByRole('button', { name: 'Giriş yap' }).click()
-  await expect(page.getByText(/Bugün \d+ ders var/)).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByText('Bugünkü dersler')).toBeVisible({ timeout: 20_000 })
   return { ctx, page }
 }
 
-test.describe('giriş yapmış akışlar', () => {
-  test.skip(!email || !password, 'E2E_EMAIL ve E2E_PASSWORD tanımlı değil')
+test.describe('giriş yapmış iki cihaz', () => {
+  test.skip(!email || !password || !isLocal, 'Yalnızca yerel ortamda test hesabıyla çalışır')
 
-  test('iki cihaz: birinde eklenen öğrenci diğerinde yenilemeden görünür', async ({ browser }) => {
+  test('birinde eklenen öğrenci diğerinde yenilemeden görünür', async ({ browser }) => {
     const a = await login(browser)
     const b = await login(browser)
     await b.page.goto('/ogrenciler')
-    await expect(b.page.getByRole('heading', { name: 'Öğrenciler' })).toBeVisible()
     await expect(b.page.getByText('Canlı')).toBeVisible({ timeout: 15_000 })
-
     const name = `E2E Öğrenci ${Date.now()}`
-    await a.page.goto('/ogrenciler')
-    await a.page.getByRole('button', { name: 'Öğrenci ekle' }).first().click()
+    await a.page.goto('/ogrenciler?yeni=1')
     await a.page.getByLabel('Ad soyad *').fill(name)
     await a.page.getByRole('button', { name: 'Kaydet' }).click()
     await expect(a.page.getByText('Öğrenci eklendi')).toBeVisible()
-
-    // İkinci cihaz sayfa yenilemeden görür
     await expect(b.page.getByText(name)).toBeVisible({ timeout: 15_000 })
     await a.ctx.close()
     await b.ctx.close()

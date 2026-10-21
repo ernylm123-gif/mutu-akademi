@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && tsc -p tsconfig.sw.json && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc -b --noEmit && tsc -p tsconfig.sw.json",
+    "typecheck": "tsc -b --noEmit && tsc -p tsconfig.sw.json && tsc -p api/tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:db": "node tests/db/rls.test.mjs",
