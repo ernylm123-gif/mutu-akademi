@@ -5,9 +5,17 @@ import App from './App'
 import { AuthProvider } from '@/hooks/useAuth'
 import { ToastProvider } from '@/components/ui/Toast'
 import { applyTheme } from '@/hooks/useTheme'
+import { readLinkKey } from '@/lib/pairing'
 import './index.css'
 
 applyTheme()
+
+// Özel bağlantıyla açıldıysa ana ekrana eklenen uygulama da aynı anahtarla başlasın (iPhone)
+{
+  const k = readLinkKey()
+  const link = document.querySelector('link[rel="manifest"]')
+  if (k && link) link.setAttribute('href', `/api/manifest?k=${k}`)
+}
 
 const queryClient = new QueryClient({
   defaultOptions: {

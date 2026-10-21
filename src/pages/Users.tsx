@@ -32,10 +32,10 @@ export function UsersPage() {
   return (
     <div>
       <PageHeader title="Cihazlar ve Kullanıcılar" subtitle="Şifresiz cihaz davetleri, roller ve erişim"
-        actions={<Button icon={<QrCode className="size-4" />} onClick={() => setInviting(true)}>Cihaz davet et</Button>} />
+        actions={<Button icon={<QrCode className="size-4" />} onClick={() => setInviting(true)}>Telefon ekle</Button>} />
       <Card className="mb-4 flex gap-3 p-4 text-sm text-slate-600 dark:text-slate-300">
         <Smartphone className="size-5 shrink-0 text-brand-600" />
-        <p><b>Yeni telefon eklemek için:</b> "Cihaz davet et" → oluşan QR kodu yeni telefonun kamerasıyla okutun (veya kodu girin). Telefon bir kez bağlandıktan sonra uygulama şifre sormadan doğrudan ana panele açılır. Erişimi kaldırmak için cihaza dokunup "Cihaz yetkili" seçeneğini kapatın.</p>
+        <p><b>Yeni telefon eklemek için:</b> "Telefon ekle" → oluşan tek kullanımlık özel bağlantıyı o telefona gönderin. Telefon bağlantıyı bir kez açınca kendiliğinden yetkilendirilir; sonraki açılışlarda hiçbir şey sormadan doğrudan ana panel açılır. Erişimi kaldırmak için cihaza dokunup "Cihaz yetkili" seçeneğini kapatın.</p>
       </Card>
       <PendingInvites />
       {pending.length > 0 && (

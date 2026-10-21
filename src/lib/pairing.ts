@@ -4,10 +4,35 @@ import { supabase } from '@/lib/supabase'
 const ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ' // Crockford base32 (I, L, O, U yok)
 export const CODE_LENGTH = 10 // 50 bit rastgelelik
 
-export function generateInviteCode(): string {
-  const bytes = new Uint8Array(CODE_LENGTH)
+export const LINK_KEY_LENGTH = 24 // özel bağlantı anahtarı: 120 bit rastgelelik
+
+export function generateInviteCode(length = CODE_LENGTH): string {
+  const bytes = new Uint8Array(length)
   crypto.getRandomValues(bytes)
   return [...bytes].map((b) => ALPHABET[b & 31]).join('') // 256 % 32 = 0 → eşit dağılım
+}
+
+/** Tek kullanımlık özel bağlantı: https://…/?k=ANAHTAR */
+export function privateLink(key: string): string {
+  return `${window.location.origin}/?k=${normalizeCode(key)}`
+}
+
+/** Adres çubuğundaki özel bağlantı anahtarını okur (eski /eslestir?kod= biçimi de desteklenir) */
+export function readLinkKey(): string | null {
+  const p = new URLSearchParams(window.location.search)
+  const raw = p.get('k') ?? p.get('kod')
+  if (!raw) return null
+  const k = normalizeCode(raw)
+  return k.length >= CODE_LENGTH && k.length <= 40 ? k : null
+}
+
+/** Anahtarı adres çubuğundan ve tarayıcı geçmişinden kaldırır */
+export function clearLinkKey() {
+  const u = new URL(window.location.href)
+  u.searchParams.delete('k')
+  u.searchParams.delete('kod')
+  const path = u.pathname === '/eslestir' ? '/' : u.pathname
+  window.history.replaceState(window.history.state, '', path + (u.search || '') + u.hash)
 }
 
 export function normalizeCode(raw: string): string {

@@ -55,7 +55,7 @@ export function NotificationPrompt() {
           Ders başlangıçlarını, program değişikliklerini ve önemli akademi duyurularını zamanında takip edebilmek için bildirimlere izin verin.
         </p>
         <p className="mt-3 rounded-2xl bg-slate-50 p-3 text-center text-sm text-slate-500 dark:bg-white/5">
-          Bildirimler, derslerin düzenli takibi ve yaklaşan derslerin hatırlatılması için önerilir. Ders başlamadan 1 saat önce hatırlatma alabilirsiniz.
+          Bildirimler, yaklaşan derslerin hatırlatılması ve günlük ders programının düzenli takibi için önerilir. Ders başlamadan 1 saat önce hatırlatma alırsınız.
         </p>
 
         {iosNotInstalled ? (

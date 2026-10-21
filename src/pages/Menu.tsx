@@ -15,7 +15,7 @@ export function MenuPage() {
     { to: '/odemeler', label: 'Ödemeler', desc: 'Tahsilat, taksit ve borçlar', icon: Wallet, show: can.payments, tone: 'bg-emerald-50 text-emerald-600' },
     { to: '/raporlar', label: 'Raporlar', desc: 'İstatistikler, PDF ve CSV', icon: BarChart3, show: can.staff, tone: 'bg-sun-100 text-sun-700' },
     { to: '/kurslar', label: 'Kurslar', desc: 'Kurs türleri ve varsayılanlar', icon: BookOpen, show: can.staff, tone: 'bg-accent-50 text-accent-600' },
-    { to: '/kullanicilar', label: 'Cihazlar ve Kullanıcılar', desc: 'Davet kodu / QR, roller, erişim', icon: UserCog, show: can.admin, tone: 'bg-slate-100 text-slate-700' },
+    { to: '/kullanicilar', label: 'Cihazlar ve Kullanıcılar', desc: 'Telefon ekle (özel bağlantı), erişim', icon: UserCog, show: can.admin, tone: 'bg-slate-100 text-slate-700' },
     { to: '/islem-gecmisi', label: 'İşlem Geçmişi', desc: 'Önemli değişikliklerin kaydı', icon: ShieldCheck, show: can.admin, tone: 'bg-slate-100 text-slate-700' },
     { to: '/ayarlar', label: 'Ayarlar', desc: 'Tema, profil ve kurallar', icon: Settings, show: true, tone: 'bg-slate-100 text-slate-700' },
     { to: '/kurulum', label: 'Telefona yükle', desc: 'Ana ekrana ekleme talimatı', icon: Smartphone, show: true, tone: 'bg-brand-50 text-brand-600' },
@@ -39,7 +39,7 @@ export function MenuPage() {
             <ChevronRight className="size-4 text-slate-300" />
           </button>
         ))}
-        <button onClick={() => { if (!profile?.is_device || window.confirm('Bu cihazın bağlantısı kesilecek. Tekrar kullanmak için yeni bir davet kodu gerekir. Devam edilsin mi?')) void signOut() }} className="flex w-full items-center gap-3 p-4 text-left text-red-600">
+        <button onClick={() => { if (!profile?.is_device || window.confirm('Bu cihazın bağlantısı kesilecek. Tekrar kullanmak için yöneticiden yeni bir özel bağlantı gerekir. Devam edilsin mi?')) void signOut() }} className="flex w-full items-center gap-3 p-4 text-left text-red-600">
           <span className="grid size-11 place-items-center rounded-2xl bg-red-50 dark:bg-red-500/15"><LogOut className="size-5" /></span>
           <span className="flex-1 font-semibold">{profile?.is_device ? 'Bu cihazın bağlantısını kes' : 'Çıkış yap'}</span>
         </button>

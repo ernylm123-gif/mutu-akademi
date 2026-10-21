@@ -3,7 +3,7 @@ import QRCode from 'qrcode'
 import { Copy, Share2, Smartphone, Trash2, QrCode, Check } from 'lucide-react'
 import { useInstructors, useInvites, useDbMutation } from '@/lib/api'
 import { supabase } from '@/lib/supabase'
-import { formatCode, generateInviteCode, pairingLink, sha256Hex } from '@/lib/pairing'
+import { generateInviteCode, LINK_KEY_LENGTH, privateLink, sha256Hex } from '@/lib/pairing'
 import { formatDateTime, relativeTime } from '@/lib/time'
 import { ROLE_LABEL } from '@/lib/format'
 import type { AppRole, Permissions } from '@/types/db'
@@ -28,7 +28,7 @@ export function InviteSheet({ open, onClose }: { open: boolean; onClose: () => v
 
   const create = useDbMutation(
     async () => {
-      const code = generateInviteCode()
+      const code = generateInviteCode(LINK_KEY_LENGTH)
       const { error } = await supabase.from('device_invites').insert({
         code_hash: await sha256Hex(code),
         label: label.trim() || (role === 'egitmen' ? instructors?.find((i) => i.id === instructorId)?.full_name : null) || ROLE_LABEL[role],
@@ -38,16 +38,16 @@ export function InviteSheet({ open, onClose }: { open: boolean; onClose: () => v
         expires_at: new Date(Date.now() + hours * 3600_000).toISOString(),
       })
       if (error) throw error
-      const link = pairingLink(code)
+      const link = privateLink(code)
       const qr = await QRCode.toDataURL(link, { margin: 1, width: 480, color: { dark: '#0f1115', light: '#ffffff' } })
-      return { code: formatCode(code), link, qr }
+      return { code, link, qr }
     },
-    { success: 'Davet oluşturuldu', invalidate: ['invites'], onSuccess: (r) => setResult(r) },
+    { success: 'Özel bağlantı oluşturuldu', invalidate: ['invites'], onSuccess: (r) => setResult(r) },
   )
 
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(`Mutu Akademi davet bağlantısı (tek kullanımlık): ${result!.link}\nKod: ${result!.code}`)
+      await navigator.clipboard.writeText(result!.link)
       setCopied(true)
       toast.success('Kopyalandı')
     } catch {
@@ -56,26 +56,26 @@ export function InviteSheet({ open, onClose }: { open: boolean; onClose: () => v
   }
   const share = async () => {
     try {
-      await navigator.share({ title: 'Mutu Akademi', text: `Mutu Akademi uygulamasına bağlanmak için tek kullanımlık davet. Kod: ${result!.code}`, url: result!.link })
+      await navigator.share({ title: 'Mutu Akademi', text: 'Mutu Akademi uygulaması için bu telefona özel, tek kullanımlık bağlantı. Telefonunuzda açın.', url: result!.link })
     } catch { /* kullanıcı vazgeçti */ }
   }
 
   return (
-    <Sheet open={open} onClose={onClose} title={result ? 'Davet hazır' : 'Yeni cihaz daveti'}
+    <Sheet open={open} onClose={onClose} title={result ? 'Özel bağlantı hazır' : 'Yeni cihaz için özel bağlantı'}
       footer={result
         ? <Button block onClick={onClose}>Tamam</Button>
-        : <div className="flex gap-2"><Button variant="secondary" block onClick={onClose}>Vazgeç</Button><Button block loading={create.isPending} icon={<QrCode className="size-4" />} onClick={() => create.mutate(undefined)}>Davet oluştur</Button></div>}>
+        : <div className="flex gap-2"><Button variant="secondary" block onClick={onClose}>Vazgeç</Button><Button block loading={create.isPending} icon={<QrCode className="size-4" />} onClick={() => create.mutate(undefined)}>Bağlantı oluştur</Button></div>}>
       {result ? (
         <div className="text-center">
           <img src={result.qr} alt="Eşleştirme QR kodu" className="mx-auto w-64 rounded-2xl border border-slate-200 bg-white p-2" />
-          <p className="mt-3 text-sm text-slate-500">Yeni telefonun kamerasıyla QR kodu okutun veya kodu girin:</p>
-          <p className="mt-2 select-all font-mono text-3xl font-bold tracking-widest">{result.code}</p>
+          <p className="mt-3 text-sm text-slate-500">Bağlantıyı yeni telefona gönderin (WhatsApp, SMS) veya telefonun kamerasıyla QR'ı okutun. Telefon bağlantıyı açınca hiçbir şey sormadan yetkilendirilir.</p>
+          <p className="mt-2 select-all break-all rounded-xl bg-slate-50 p-2 font-mono text-xs dark:bg-white/5">{result.link}</p>
           <div className="mt-4 grid grid-cols-2 gap-2">
             <Button variant="secondary" icon={copied ? <Check className="size-4" /> : <Copy className="size-4" />} onClick={copy}>Kopyala</Button>
             {'share' in navigator && <Button variant="secondary" icon={<Share2 className="size-4" />} onClick={share}>Paylaş</Button>}
           </div>
           <p className="mt-4 rounded-xl bg-amber-50 p-3 text-left text-xs text-amber-800 dark:bg-amber-500/15 dark:text-amber-300">
-            Bu kod yalnızca bir kez gösterilir, tek bir cihazda kullanılabilir ve {hours === 1 ? '1 saat' : hours < 48 ? `${hours} saat` : `${hours / 24} gün`} sonra geçersiz olur. Kodu yalnızca ilgili kişiyle paylaşın.
+            Bu bağlantı yalnızca bir kez gösterilir, yalnızca tek bir cihazda bir kez kullanılabilir ve {hours === 1 ? '1 saat' : hours < 48 ? `${hours} saat` : `${hours / 24} gün`} sonra geçersiz olur. Bağlantıyı yalnızca ilgili kişiyle paylaşın; açıldığı anda geçersiz olur.
           </p>
         </div>
       ) : (

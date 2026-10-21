@@ -95,7 +95,7 @@ export function AppShell() {
               <p className="truncate text-sm font-semibold">{profile.full_name || profile.email}</p>
               <p className="text-xs text-slate-500">{ROLE_LABEL[profile.role]}</p>
             </div>
-            <button onClick={() => { if (!profile.is_device || window.confirm('Bu cihazın bağlantısı kesilecek. Tekrar kullanmak için yeni bir davet kodu gerekir. Devam edilsin mi?')) void signOut() }} className="grid size-9 place-items-center rounded-full text-slate-500 hover:bg-slate-200 dark:hover:bg-white/10" aria-label="Çıkış yap" title="Çıkış yap">
+            <button onClick={() => { if (!profile.is_device || window.confirm('Bu cihazın bağlantısı kesilecek. Tekrar kullanmak için yöneticiden yeni bir özel bağlantı gerekir. Devam edilsin mi?')) void signOut() }} className="grid size-9 place-items-center rounded-full text-slate-500 hover:bg-slate-200 dark:hover:bg-white/10" aria-label="Çıkış yap" title="Çıkış yap">
               <LogOut className="size-4" />
             </button>
           </div>

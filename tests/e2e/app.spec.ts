@@ -6,43 +6,29 @@ const SUPABASE_URL = process.env.E2E_SUPABASE_URL
 const SUPABASE_KEY = process.env.E2E_SUPABASE_KEY // herkese açık (publishable) anahtar
 
 test.describe('herkese açık sayfalar', () => {
-  test('yetkisiz cihaz şifre değil, cihaz eşleştirme ekranı görür', async ({ page }) => {
+  test('yetkisiz cihaz giriş/şifre/kod formu görmez, veri görmez', async ({ page }) => {
     await page.goto('/ogrenciler')
-    await expect(page).toHaveURL(/\/eslestir$/)
-    await expect(page.getByRole('heading', { name: 'Cihazı bağla' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Bu cihaz yetkili değil' })).toBeVisible()
+    await expect(page.locator('input')).toHaveCount(0)
     await expect(page.getByLabel('Şifre')).toHaveCount(0)
     await expect(page.getByText('MUTU AKADEMİ').first()).toBeVisible()
   })
 
   test('ders detay bağlantısı (bildirimden) yetkisiz cihazda veri göstermez', async ({ page }) => {
     await page.goto('/ders/00000000-0000-0000-0000-000000000000')
-    await expect(page).toHaveURL(/\/eslestir$/)
-    await expect(page.getByRole('heading', { name: 'Cihazı bağla' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Bu cihaz yetkili değil' })).toBeVisible()
   })
 
-  test('kısa davet kodu sunucuya gönderilmeden reddedilir', async ({ page }) => {
-    await page.goto('/eslestir')
-    await page.getByLabel('Davet kodu').fill('ABC')
-    await page.getByRole('button', { name: 'Cihazı bağla' }).click()
-    await expect(page.getByRole('alert')).toContainText('10 karakter')
-  })
 
-  test('davet kodu adres çubuğundan ve geçmişten silinir', async ({ page }) => {
-    await page.goto('/eslestir?kod=AAAAA-BBBBB')
-    await expect(page).toHaveURL(/\/eslestir$/)
-    await expect(page.getByLabel('Davet kodu')).toHaveValue('AAAAA-BBBBB')
-  })
 
-  test('mobilde yatay taşma yok ve dokunma hedefleri en az 44px', async ({ page }) => {
-    await page.goto('/eslestir')
+  test('mobilde yatay taşma yok', async ({ page }) => {
+    await page.goto('/')
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
     expect(overflow).toBeLessThanOrEqual(1)
-    const h = await page.getByRole('button', { name: 'Cihazı bağla' }).evaluate((b) => b.getBoundingClientRect().height)
-    expect(h).toBeGreaterThanOrEqual(44)
   })
 
   test('PWA: manifest, ikonlar, iOS ayarları ve service worker', async ({ page, request }) => {
-    await page.goto('/eslestir')
+    await page.goto('/')
     const manifestHref = await page.locator('link[rel="manifest"]').getAttribute('href')
     expect(manifestHref).toBeTruthy()
     const m = await (await request.get(manifestHref!)).json()
@@ -63,7 +49,7 @@ test.describe('herkese açık sayfalar', () => {
   })
 
   test('service worker kaydolur ve veri isteklerini önbelleğe almaz', async ({ page }) => {
-    await page.goto('/eslestir')
+    await page.goto('/')
     const ok = await page.evaluate(async () => {
       const reg = await Promise.race([navigator.serviceWorker.ready, new Promise((r) => setTimeout(() => r(null), 15000))])
       return !!reg

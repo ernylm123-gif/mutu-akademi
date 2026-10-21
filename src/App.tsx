@@ -1,11 +1,13 @@
-import { lazy, Suspense, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
 import { supabaseConfigured } from '@/lib/supabase'
+import { clearLinkKey, readLinkKey } from '@/lib/pairing'
+import { DeviceGate } from '@/pages/DeviceGate'
 import { AppShell } from '@/components/layout/AppShell'
 import { UpdateBanner } from '@/components/layout/UpdateBanner'
 import { PageLoader } from '@/components/ui'
-import { LoginPage, PairPage, RegisterPage, ForgotPasswordPage, UpdatePasswordPage, PendingApprovalPage, MissingConfigPage } from '@/pages/Auth'
+import { LoginPage, ForgotPasswordPage, UpdatePasswordPage, PendingApprovalPage, MissingConfigPage } from '@/pages/Auth'
 import { DashboardPage } from '@/pages/Dashboard'
 
 const CalendarPage = lazy(() => import('@/pages/Calendar').then((m) => ({ default: m.CalendarPage })))
@@ -33,11 +35,16 @@ function Guard({ allow, children }: { allow: boolean; children: ReactNode }) {
 
 function Protected() {
   const { session, profile, loading, can } = useAuth()
-  if (loading) return <div className="grid min-h-dvh place-items-center"><PageLoader /></div>
-  if (!session) return <Navigate to="/eslestir" replace />
-  if (!profile) return <div className="grid min-h-dvh place-items-center"><PageLoader /></div>
-  if (!profile.approved) return <PairPage />
-  if (!profile.is_active) return <PendingApprovalPage />
+  const [linkKey] = useState(readLinkKey)
+  const authorized = !!profile?.approved && profile.is_active
+  // Yetkili cihaz özel bağlantıyı tekrar açarsa (ör. iOS ana ekran başlangıç adresi) anahtarı adres çubuğundan sil
+  useEffect(() => {
+    if (authorized && linkKey) clearLinkKey()
+  }, [authorized, linkKey])
+
+  if (loading || (session && !profile)) return <div className="grid min-h-dvh place-items-center"><PageLoader /></div>
+  if (profile?.approved && !profile.is_active) return <PendingApprovalPage />
+  if (!authorized) return <DeviceGate linkKey={linkKey} />
   return (
     <Suspense fallback={<PageLoader />}>
       <Routes>
@@ -81,8 +88,7 @@ export default function App() {
       <UpdateBanner />
       <Routes>
         <Route path="/giris" element={<PublicOnly><LoginPage /></PublicOnly>} />
-        <Route path="/eslestir" element={<PairPage />} />
-        <Route path="/kayit" element={<PublicOnly><RegisterPage /></PublicOnly>} />
+        <Route path="/kayit" element={<Navigate to="/" replace />} />
         <Route path="/sifremi-unuttum" element={<ForgotPasswordPage />} />
         <Route path="/sifre-yenile" element={<UpdatePasswordPage />} />
         <Route path="/*" element={<Protected />} />
