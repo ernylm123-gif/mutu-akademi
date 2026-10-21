@@ -10,6 +10,7 @@ import { useNotifications, rpc } from '@/lib/api'
 import { useRealtimeSync, useSyncStatus } from '@/hooks/useRealtimeSync'
 import { ROLE_LABEL } from '@/lib/format'
 import { Avatar, Button } from '@/components/ui'
+import { NotificationPrompt } from '@/components/NotificationPrompt'
 import { Logo } from './Logo'
 
 export { Logo }
@@ -110,6 +111,7 @@ export function AppShell() {
       </header>
 
       <ConnectionBanner />
+      <NotificationPrompt />
 
       <main key={loc.pathname} className="fade-in pb-nav mx-auto w-full max-w-6xl px-4 pt-4 lg:px-8 lg:pb-10 lg:pt-8">
         <div className="mb-4 hidden justify-end lg:flex"><SyncDot /></div>

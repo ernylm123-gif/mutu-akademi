@@ -61,9 +61,10 @@ export function usePush(userId: string | undefined) {
   )
   const [subscribed, setSubscribed] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [checked, setChecked] = useState(false)
 
   const refresh = useCallback(async () => {
-    if (!support.ok || !userId) return
+    if (!support.ok || !userId) { setChecked(true); return }
     const reg = await navigator.serviceWorker.ready
     const sub = await reg.pushManager.getSubscription()
     setPermission(Notification.permission)
@@ -74,6 +75,7 @@ export function usePush(userId: string | undefined) {
     } else {
       setSubscribed(false)
     }
+    setChecked(true)
   }, [support.ok, userId])
 
   useEffect(() => {
@@ -119,5 +121,5 @@ export function usePush(userId: string | undefined) {
     }
   }, [])
 
-  return { support, permission, subscribed, busy, enable, disable, refresh }
+  return { support, permission, subscribed, busy, checked, enable, disable, refresh }
 }
