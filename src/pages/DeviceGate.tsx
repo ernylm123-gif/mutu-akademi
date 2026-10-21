@@ -4,6 +4,13 @@ import { useAuth } from '@/hooks/useAuth'
 import { clearLinkKey, guessDeviceName, isIosBrowserNotInstalled, pairDevice } from '@/lib/pairing'
 import { Button, PageLoader } from '@/components/ui'
 
+function withLimit<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error('Sunucuya ulaşılamadı. İnternet bağlantınızı kontrol edip yeniden deneyin.')), ms)
+    p.then((v) => { clearTimeout(t); resolve(v) }, (e) => { clearTimeout(t); reject(e) })
+  })
+}
+
 function Screen({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-dvh flex-col items-center justify-center bg-white px-6 py-10 text-center dark:bg-[#0b0f14]">
@@ -22,29 +29,48 @@ function Screen({ children }: { children: ReactNode }) {
  *   (ana ekran uygulaması Safari'den ayrı depolama kullanır).
  * - Anahtar yoksa yalnızca bilgilendirme gösterilir; hiçbir veri görünmez.
  */
+// Aynı anahtar için tek bir eşleştirme işlemi (bileşen yeniden bağlansa bile tekrar çalışmaz)
+let pairing: { key: string; promise: Promise<void> } | null = null
+let pairingError: string | null = null
+
 export function DeviceGate({ linkKey }: { linkKey: string | null }) {
   const { refreshProfile } = useAuth()
-  const [state, setState] = useState<'idle' | 'pairing' | 'error'>('idle')
-  const [error, setError] = useState<string | null>(null)
+  const [state, setState] = useState<'idle' | 'pairing' | 'error'>(pairingError ? 'error' : 'idle')
+  const [error, setError] = useState<string | null>(pairingError)
   const [useHere, setUseHere] = useState(false)
-  const started = useRef(false)
+  const mounted = useRef(true)
   const iosSafari = isIosBrowserNotInstalled()
   const waitInstall = !!linkKey && iosSafari && !useHere
 
   useEffect(() => {
-    if (!linkKey || waitInstall || started.current) return
-    started.current = true
+    mounted.current = true
+    return () => { mounted.current = false }
+  }, [])
+
+  useEffect(() => {
+    if (!linkKey || waitInstall || pairingError) return
+    if (!pairing || pairing.key !== linkKey) {
+      pairing = {
+        key: linkKey,
+        promise: withLimit(pairDevice(linkKey, guessDeviceName()), 20_000)
+          .then(async () => {
+            clearLinkKey()
+            await refreshProfile()
+          })
+          .catch((e: Error) => {
+            // Anahtar kullanılmış/geçersizse adres çubuğundan sil; ağ hatasında yeniden denemek için koru
+            if (/geçersiz|kullanılmış|süresi/i.test(e.message)) clearLinkKey()
+            pairingError = e.message
+            throw e
+          }),
+      }
+    }
     setState('pairing')
-    pairDevice(linkKey, guessDeviceName())
-      .then(async () => {
-        clearLinkKey()
-        await refreshProfile()
-      })
-      .catch((e: Error) => {
-        clearLinkKey()
-        setError(e.message)
-        setState('error')
-      })
+    pairing.promise.catch((e: Error) => {
+      if (!mounted.current) return
+      setError(e.message)
+      setState('error')
+    })
   }, [linkKey, waitInstall, refreshProfile])
 
   if (waitInstall) {
@@ -80,7 +106,7 @@ export function DeviceGate({ linkKey }: { linkKey: string | null }) {
       ) : (
         <p className="mt-2 text-sm text-slate-500">Mutu Akademi'yi kullanmak için yöneticinizden bu cihaza özel, tek kullanımlık bağlantıyı isteyin ve bu cihazda açın. Bir kez açtıktan sonra uygulama her seferinde doğrudan açılır.</p>
       )}
-      {error && <Button variant="secondary" className="mt-4" icon={<RefreshCw className="size-4" />} onClick={() => window.location.replace('/')}>Yeniden dene</Button>}
+      {error && <Button variant="secondary" className="mt-4" icon={<RefreshCw className="size-4" />} onClick={() => window.location.reload()}>Yeniden dene</Button>}
       <p className="mt-6 flex items-start gap-2 rounded-2xl bg-slate-50 p-3 text-left text-xs text-slate-500 dark:bg-white/5">
         <ShieldCheck className="mt-0.5 size-4 shrink-0 text-brand-600" />
         Öğrenci, veli ve ödeme bilgileri yalnızca yetkilendirilmiş cihazlarda görünür.

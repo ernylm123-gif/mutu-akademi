@@ -4,6 +4,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { supabaseConfigured } from '@/lib/supabase'
 import { clearLinkKey, readLinkKey } from '@/lib/pairing'
 import { DeviceGate } from '@/pages/DeviceGate'
+import { AppErrorBoundary, BootErrorScreen, BootLoader } from '@/components/BootRecovery'
 import { AppShell } from '@/components/layout/AppShell'
 import { UpdateBanner } from '@/components/layout/UpdateBanner'
 import { PageLoader } from '@/components/ui'
@@ -34,7 +35,7 @@ function Guard({ allow, children }: { allow: boolean; children: ReactNode }) {
 }
 
 function Protected() {
-  const { session, profile, loading, can } = useAuth()
+  const { profile, loading, bootError, retry, can } = useAuth()
   const [linkKey] = useState(readLinkKey)
   const authorized = !!profile?.approved && profile.is_active
   // Yetkili cihaz özel bağlantıyı tekrar açarsa (ör. iOS ana ekran başlangıç adresi) anahtarı adres çubuğundan sil
@@ -42,9 +43,17 @@ function Protected() {
     if (authorized && linkKey) clearLinkKey()
   }, [authorized, linkKey])
 
-  if (loading || (session && !profile)) return <div className="grid min-h-dvh place-items-center"><PageLoader /></div>
-  if (profile?.approved && !profile.is_active) return <PendingApprovalPage />
-  if (!authorized) return <DeviceGate linkKey={linkKey} />
+  // Açılış her zaman sonlanır: yükleniyor (süre sınırlı) → yetkili / yetkisiz / hata
+  if (loading) return <BootLoader onRetry={() => void retry()} />
+  if (authorized) {
+    // yetkili: uygulama (aşağıda)
+  } else if (bootError) {
+    return <BootErrorScreen kind={bootError.kind} message={bootError.message} onRetry={() => void retry()} />
+  } else if (profile?.approved && !profile.is_active) {
+    return <PendingApprovalPage />
+  } else {
+    return <DeviceGate linkKey={linkKey} />
+  }
   return (
     <Suspense fallback={<PageLoader />}>
       <Routes>
@@ -84,6 +93,7 @@ function PublicOnly({ children }: { children: ReactNode }) {
 export default function App() {
   if (!supabaseConfigured) return <MissingConfigPage />
   return (
+    <AppErrorBoundary>
     <BrowserRouter>
       <UpdateBanner />
       <Routes>
@@ -94,5 +104,6 @@ export default function App() {
         <Route path="/*" element={<Protected />} />
       </Routes>
     </BrowserRouter>
+    </AppErrorBoundary>
   )
 }

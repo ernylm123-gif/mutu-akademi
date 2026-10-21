@@ -12,15 +12,19 @@ export function generateInviteCode(length = CODE_LENGTH): string {
   return [...bytes].map((b) => ALPHABET[b & 31]).join('') // 256 % 32 = 0 → eşit dağılım
 }
 
-/** Tek kullanımlık özel bağlantı: https://…/?k=ANAHTAR */
+/**
+ * Tek kullanımlık özel bağlantı: https://…/#k=ANAHTAR
+ * Anahtar adresin # bölümündedir; tarayıcı bu bölümü sunucuya hiç göndermez (log/Referer sızıntısı yok).
+ */
 export function privateLink(key: string): string {
-  return `${window.location.origin}/?k=${normalizeCode(key)}`
+  return `${window.location.origin}/#k=${normalizeCode(key)}`
 }
 
 /** Adres çubuğundaki özel bağlantı anahtarını okur (eski /eslestir?kod= biçimi de desteklenir) */
 export function readLinkKey(): string | null {
   const p = new URLSearchParams(window.location.search)
-  const raw = p.get('k') ?? p.get('kod')
+  const h = new URLSearchParams(window.location.hash.replace(/^#/, ''))
+  const raw = h.get('k') ?? p.get('k') ?? p.get('kod')
   if (!raw) return null
   const k = normalizeCode(raw)
   return k.length >= CODE_LENGTH && k.length <= 40 ? k : null
@@ -32,7 +36,7 @@ export function clearLinkKey() {
   u.searchParams.delete('k')
   u.searchParams.delete('kod')
   const path = u.pathname === '/eslestir' ? '/' : u.pathname
-  window.history.replaceState(window.history.state, '', path + (u.search || '') + u.hash)
+  window.history.replaceState(window.history.state, '', path + (u.search || ''))
 }
 
 export function normalizeCode(raw: string): string {

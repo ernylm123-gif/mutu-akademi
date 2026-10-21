@@ -5,17 +5,20 @@ import App from './App'
 import { AuthProvider } from '@/hooks/useAuth'
 import { ToastProvider } from '@/components/ui/Toast'
 import { applyTheme } from '@/hooks/useTheme'
-import { readLinkKey } from '@/lib/pairing'
+import { isIosBrowserNotInstalled, readLinkKey } from '@/lib/pairing'
 import './index.css'
 
 applyTheme()
 
-// Özel bağlantıyla açıldıysa ana ekrana eklenen uygulama da aynı anahtarla başlasın (iPhone)
+// iPhone: Safari'de özel bağlantıyla açıldıysa ana ekrana eklenen uygulama da aynı anahtarla başlasın
+// (ana ekran uygulaması Safari'den ayrı depolama kullanır). Yalnızca iOS Safari'de yapılır.
 {
   const k = readLinkKey()
   const link = document.querySelector('link[rel="manifest"]')
-  if (k && link) link.setAttribute('href', `/api/manifest?k=${k}`)
+  if (k && link && isIosBrowserNotInstalled()) link.setAttribute('href', `/api/manifest?k=${k}`)
 }
+// Başarılı açılıştan sonra "eski sürüm" kurtarma bayrağını sıfırla
+setTimeout(() => { try { sessionStorage.removeItem('mutu-chunk-reload') } catch { /* yoksay */ } }, 10_000)
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -30,6 +33,7 @@ const queryClient = new QueryClient({
   },
 })
 
+;(window as unknown as { __mutuMounted?: boolean }).__mutuMounted = true
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>

@@ -17,7 +17,7 @@ export default function handler(req: { query?: Record<string, string | string[]>
     description: 'Mutu Akademi öğrenci ve ders takip uygulaması',
     lang: 'tr',
     dir: 'ltr',
-    start_url: k ? `/?k=${k}` : '/?kaynak=pwa',
+    start_url: k ? `/#k=${k}` : '/?kaynak=pwa',
     scope: '/',
     display: 'standalone',
     orientation: 'portrait',
