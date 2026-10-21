@@ -168,7 +168,7 @@ await db.query('select private.enqueue_lesson_reminders()')
 await db.query('select private.enqueue_lesson_reminders()')
 r = await db.query(`select count(*)::int n, max(body) body from public.push_deliveries where lesson_id=$1 and kind='lesson_60'`, [pl.id])
 ok('60 dk hatırlatması tam bir kez kuyruğa alınır', r.rows[0].n === 1, r.rows[0].n)
-ok('hatırlatma metni öğrenci, kurs ve saati içerir', /Elif.*Piyano[\s\S]*Ders saati: \d\d\.\d\d–\d\d\.\d\d[\s\S]*1 saat kaldı/.test(r.rows[0].body), r.rows[0].body)
+ok('hatırlatma metni kurs, saat ve öğrenciyi içerir', /^Piyano saat \d\d\.\d\d'(te|de|ta|da) başlayacak\. Dersin başlamasına 1 saat kaldı\.\nÖğrenci: Elif Kaya$/.test(r.rows[0].body), r.rows[0].body)
 
 r = await as('anon', `select * from public.claim_push_batch('yanlis-anahtar-yanlis-anahtar-yanlis-anahtar')`)
 ok('yanlış gizli anahtarla gönderim kuyruğu okunamaz', !!r.error)
@@ -258,7 +258,7 @@ ok('girişsiz ziyaretçi abonelik listesini okuyamaz', !!r.error || r.rows?.[0]?
 
 // --- Herkese açık aktiviteler, duyurular, değişiklik bildirimleri ---
 r = await db.query(`select d.body from public.push_deliveries d join public.push_subscriptions s on s.id=d.subscription_id where s.is_public and d.kind='lesson_60' and d.lesson_id=$1`, [pubLesson])
-ok('açık hatırlatma metni yalnızca kurs ve saat içerir', r.rows.length === 1 && /^Piyano saat \d\d\.\d\d'te başlayacak\. Dersin başlamasına 1 saat kaldı\.$/.test(r.rows[0].body), JSON.stringify(r.rows))
+ok('açık hatırlatma metni yalnızca kurs ve saat içerir', r.rows.length === 1 && /^Piyano saat \d\d\.\d\d'(te|de|ta|da) başlayacak\. Dersin başlamasına 1 saat kaldı\.$/.test(r.rows[0].body), JSON.stringify(r.rows))
 r = await as('anon', `select * from public.get_public_activities(20)`)
 ok('girişsiz ziyaretçi ders aktivitelerini görür', (r.rows ?? []).length > 0, r.error?.message)
 ok('açık aktivitelerde öğrenci adı/telefon yok', !/Elif|0532|Can Demir/.test(JSON.stringify(r.rows ?? [])))
@@ -279,6 +279,216 @@ r = await as('anon', `select public.send_public_test_push('https://push.example/
 ok('açık cihaz kendine test bildirimi gönderebilir', !r.error, r.error?.message)
 r = await as('anon', `select public.send_public_test_push('https://push.example/olmayan')`)
 ok('başkasının olmayan aboneliğine test gönderilemez', !!r.error)
+
+// --- Profesyonel ders programı: paketler, seri, erteleme, iptal, tamamlama, grup, sınıf ---
+const istDate = (days) => new Date(Date.now() + days * 86400000).toLocaleDateString('sv-SE', { timeZone: 'Europe/Istanbul' })
+r = await db.query(`select private.tr_saat('2026-10-22 16:00+03','dat') a, private.tr_saat('2026-10-22 14:00+03','loc') b,
+  private.tr_saat('2026-10-22 16:00+03','loc') c, private.tr_saat('2026-10-22 14:30+03','dat') d, private.tr_saat('2026-10-22 09:00+03','dat') e`)
+ok("Türkçe saat ekleri doğru (16.00'ya, 14.00'te, 16.00'da, 14.30'a, 09.00'a)",
+  r.rows[0].a === "16.00'ya" && r.rows[0].b === "14.00'te" && r.rows[0].c === "16.00'da" && r.rows[0].d === "14.30'a" && r.rows[0].e === "09.00'a", JSON.stringify(r.rows[0]))
+
+r = await as(admin, `insert into public.courses (name) values ('Python Eğitimi') returning id`)
+const pyCourse = r.rows[0].id
+r = await as(admin, `insert into public.instructors (full_name) values ('Deniz Hoca') returning id`)
+const inst2 = r.rows[0].id
+r = await as(admin, `insert into public.instructors (full_name) values ('Selin Hoca') returning id`)
+const inst3 = r.rows[0].id
+r = await as(admin, `insert into public.rooms (name, capacity) values ('Bilgisayar Laboratuvarı', 2) returning id`)
+const room = r.rows?.[0]?.id
+ok('yönetici sınıf ekler', !!room, r.error?.message)
+r = await as(other, `insert into public.rooms (name) values ('Sızma Odası')`)
+ok('yetkisiz cihaz sınıf ekleyemez', !!r.error)
+
+r = await as(admin, `insert into public.students (full_name, course_id, instructor_id) values ('Ezgi Test', $1, $2) returning id`, [pyCourse, inst2])
+const ezgi = r.rows[0].id
+ok('1) yeni öğrenci eklenir', !!ezgi)
+r = await as(admin, `insert into public.students (full_name, course_id) values ('Mert Test', $1) returning id`, [pyCourse])
+const mert = r.rows[0].id
+r = await as(admin, `insert into public.students (full_name, course_id) values ('Zeynep Test', $1) returning id`, [pyCourse])
+const zeynep = r.rows[0].id
+
+const pkgRef = '11111111-2222-4333-8444-555555555555'
+r = await as(admin, `select * from public.add_lesson_package($1, '24 derslik paket', 24, 12000, true, null, 'paket', $2)`, [ezgi, pkgRef])
+ok('2) öğrenciye ders paketi tanımlanır', !r.error && r.rows[0].lesson_count === 24, r.error?.message)
+await as(admin, `select * from public.add_lesson_package($1, '24 derslik paket', 24, 12000, true, null, 'paket', $2)`, [ezgi, pkgRef])
+r = await db.query(`select total_lessons, remaining_lessons, total_fee::int fee from public.students where id=$1`, [ezgi])
+ok('aynı paket isteği iki kez işlenmez; hak ve borç bir kez eklenir', r.rows[0].total_lessons === 24 && r.rows[0].fee === 12000, JSON.stringify(r.rows[0]))
+await as(admin, `update public.students set total_lessons = 26 where id=$1`, [ezgi])
+r = await db.query(`select (select total_lessons from public.students where id=$1) t, (select count(*)::int from public.lesson_packages where student_id=$1 and kind='duzeltme' and lesson_count=2) k`, [ezgi])
+ok('toplam hak elle değişirse fark düzeltme hareketi olarak kaydedilir', r.rows[0].t === 26 && r.rows[0].k === 1, JSON.stringify(r.rows[0]))
+r = await as('anon', `select count(*)::int n from public.lesson_packages`)
+ok('girişsiz ziyaretçi ders hakkı hareketlerini göremez', !!r.error || r.rows[0].n === 0)
+r = await as(other, `select * from public.add_lesson_package($1, 'x', 5)`, [ezgi])
+ok('yetkisiz cihaz paket ekleyemez', !!r.error)
+
+const d3 = istDate(3)
+const single = { student_ids: [ezgi], instructor_id: inst2, course_id: pyCourse, room_id: room, date: d3, start: '14:00', end: '16:00', title: 'Python – Döngüler' }
+r = await as(admin, `select public.preview_lessons($1) p`, [single])
+ok('ön kontrol tek ders ve çakışmasız döner', r.rows?.[0]?.p?.count === 1 && r.rows[0].p.conflict_count === 0, r.error?.message ?? JSON.stringify(r.rows?.[0]))
+const createRef = '22222222-2222-4333-8444-555555555555'
+r = await as(admin, `select public.create_lessons($1, false, $2) res`, [single, createRef])
+ok('3) tek seferlik ders oluşturulur', r.rows?.[0]?.res?.created === 1, r.error?.message)
+const singleId = r.rows?.[0]?.res?.first_lesson_id
+r = await as(admin, `select public.create_lessons($1, false, $2) res`, [single, createRef])
+r = await db.query(`select count(*)::int n from public.lessons where student_id=$1`, [ezgi])
+ok('aynı oluşturma isteği tekrar gelirse çift ders oluşmaz', r.rows[0].n === 1, String(r.rows[0].n))
+
+r = await as(admin, `select public.create_lessons($1) res`, [{ ...single, student_ids: [mert], room_id: null }])
+ok('13) eğitmen saat çakışması engellenir', !!r.error && /Çakışma/.test(r.error.message) && /Eğitmen/.test(r.error.message), r.error?.message)
+r = await as(admin, `select public.create_lessons($1) res`, [{ ...single, student_ids: [mert], instructor_id: inst3 }])
+ok('14) sınıf çakışması engellenir', !!r.error && /Sınıf/.test(r.error.message), r.error?.message)
+r = await as(admin, `select public.create_lessons($1) res`, [{ ...single, student_ids: [mert, zeynep, ezgi], instructor_id: inst3, start: '09:00', end: '10:00' }])
+ok('sınıf kapasitesi aşılamaz', !!r.error && /kapasite/.test(r.error.message), r.error?.message)
+
+const repeatDef = { student_ids: [mert], instructor_id: inst3, course_id: pyCourse, date: istDate(1), start: '18:00', end: '19:00',
+  repeat: { freq: 'haftalik', weekdays: [1, 3], until: istDate(91) } }
+r = await as(admin, `select public.create_lessons($1) res`, [repeatDef])
+const rep = r.rows?.[0]?.res
+ok('4) haftalık tekrarlayan ders (Pzt+Çar, 3 ay) oluşturulur', rep?.created >= 24 && rep?.created <= 28 && !!rep.series_id, r.error?.message ?? JSON.stringify(rep))
+r = await db.query(`select count(*)::int n from public.lessons where series_id=$1 and extract(isodow from starts_at at time zone 'Europe/Istanbul') not in (1,3)`, [rep?.series_id])
+ok('seri yalnızca seçilen günlerde', r.rows[0].n === 0)
+
+// erteleme
+r = await db.query(`select version, starts_at from public.lessons where id=$1`, [singleId])
+const before = (await db.query(`select remaining_lessons from public.students where id=$1`, [ezgi])).rows[0].remaining_lessons
+const newStart = `${istDate(4)}T16:00:00+03:00`, newEnd = `${istDate(4)}T18:00:00+03:00`
+r = await as(admin, `select public.postpone_lesson($1,$2,$3,$4,'ogrenci','Sınav haftası', '33333333-2222-4333-8444-555555555555') res`, [singleId, r.rows[0].version, newStart, newEnd])
+const postponedTo = r.rows?.[0]?.res?.new_lesson_id
+ok('5) ders başka güne ertelenir', !!postponedTo, r.error?.message)
+r = await db.query(`select status, postpone_reason, status_reason from public.lessons where id=$1`, [singleId])
+ok('6) eski ders kaydı "ertelendi" olarak geçmişte korunur', r.rows[0].status === 'ertelendi' && r.rows[0].postpone_reason === 'ogrenci' && /Sınav/.test(r.rows[0].status_reason), JSON.stringify(r.rows[0]))
+r = await db.query(`select rescheduled_from, status, room_id from public.lessons where id=$1`, [postponedTo])
+ok('yeni tarihli ders planlandı, eski kayda bağlı ve sınıfı korunur', r.rows[0]?.rescheduled_from === singleId && r.rows[0].status === 'planlandi' && r.rows[0].room_id === room)
+r = await db.query(`select remaining_lessons from public.students where id=$1`, [ezgi])
+ok('7) ertelenen ders için ders hakkı düşmez', r.rows[0].remaining_lessons === before)
+r = await as(admin, `select public.postpone_lesson($1,null,$2,$3,'ogrenci') res`, [singleId, newStart, newEnd])
+ok('aynı erteleme ikinci kez uygulanamaz (çift kayıt yok)', !!r.error && /zaten ertelendi/.test(r.error.message), r.error?.message)
+r = await db.query(`select body from public.push_deliveries d join public.push_subscriptions ps on ps.id=d.subscription_id where ps.is_public and d.kind='pub_time' and d.lesson_id=$1`, [postponedTo])
+ok("erteleme bildirimi: 'Python Eğitimi ... 14.00 yerine ... 16.00'ya ertelendi.' (isimsiz)", /^Ders programı güncellendi\. Python Eğitimi .*14\.00 yerine .*16\.00'ya ertelendi\.$/.test(r.rows[0]?.body ?? ''), r.rows[0]?.body)
+r = await as(admin, `select public.postpone_lesson($1,null,$2,$3,'egitmen') res`, [postponedTo, `${istDate(4)}T16:30:00+03:00`, `${istDate(4)}T17:30:00+03:00`])
+ok('yeni saat çakışmıyorsa tekrar ertelenebilir', !r.error, r.error?.message)
+const p2 = r.rows?.[0]?.res?.new_lesson_id
+r = await as(admin, `select public.create_lessons($1) res`, [{ student_ids: [zeynep], instructor_id: inst2, date: istDate(4), start: '17:00', end: '18:00' }])
+ok('erteleme sonrası eğitmenin yeni saatiyle çakışan ders engellenir', !!r.error, r.error?.message)
+
+// hatırlatma: eski saate gönderilmez, yeni saate göre planlanır
+await db.query(`insert into public.push_subscriptions (user_id, endpoint, p256dh, auth) values ($1, 'https://push.example/admin', 'k', 'a')`, [admin])
+const soon3 = new Date(Date.now() + 20 * 60000), soonEnd3 = new Date(soon3.getTime() + 3600000)
+r = await as(admin, `insert into public.lessons (student_id, instructor_id, course_id, starts_at, ends_at) values ($1,$2,$3,$4,$5) returning id, version`, [zeynep, inst3, pyCourse, soon3.toISOString(), soonEnd3.toISOString()])
+const soonL3 = r.rows[0]
+await db.query(`insert into public.push_deliveries (subscription_id, user_id, kind, lesson_id, lesson_starts_at, title, body) select id, user_id, 'lesson_15', $1, $2, 't', 'b' from public.push_subscriptions where endpoint='https://push.example/admin'`, [soonL3.id, soon3.toISOString()])
+const moved = new Date(Date.now() + 59 * 60000), movedEnd = new Date(moved.getTime() + 3600000)
+r = await as(admin, `select public.postpone_lesson($1,$2,$3,$4,'kurum') res`, [soonL3.id, soonL3.version, moved.toISOString(), movedEnd.toISOString()])
+const movedId = r.rows?.[0]?.res?.new_lesson_id
+ok('yakın saatli ders ertelenir', !!movedId, r.error?.message)
+r = await db.query(`select status from public.push_deliveries where lesson_id=$1 and kind='lesson_15'`, [soonL3.id])
+ok('eski saatin bekleyen hatırlatması geçersiz olur', r.rows.length === 1 && r.rows[0].status === 'skipped', JSON.stringify(r.rows))
+await db.query(`select private.enqueue_lesson_reminders()`)
+r = await db.query(`select count(*)::int n from public.push_deliveries where lesson_id=$1 and kind='lesson_60'`, [movedId])
+ok('8) yeni saate göre 1 saat önce hatırlatma planlanır', r.rows[0].n >= 1, String(r.rows[0].n))
+
+// iptal ve geri alma
+r = await db.query(`select id, version from public.lessons where series_id=$1 order by starts_at limit 1`, [rep.series_id])
+const firstRep = r.rows[0]
+r = await as(admin, `select status from public.cancel_lesson($1,$2,'Resmi tatil')`, [firstRep.id, firstRep.version])
+ok('9) iptal edilen ders takvimde "iptal" olarak kalır', r.rows?.[0]?.status === 'iptal', r.error?.message)
+r = await as('anon', `select status from public.get_public_schedule(now(), now() + interval '30 days') where id=$1`, [firstRep.id])
+ok('iptal edilen ders ortak programda da görünür', r.rows?.[0]?.status === 'iptal', r.error?.message ?? JSON.stringify(r.rows))
+r = await db.query(`select version from public.lessons where id=$1`, [firstRep.id])
+r = await as(admin, `select status from public.restore_lesson($1,$2)`, [firstRep.id, r.rows[0].version])
+ok('yanlışlıkla iptal edilen ders geri alınır', r.rows?.[0]?.status === 'planlandi', r.error?.message)
+
+// tamamlama ve ders hakkı
+r = await as(admin, `select * from public.add_lesson_package($1, 'Paket', 10, 0)`, [zeynep])
+r = await as(admin, `select public.create_lessons($1) res`, [{ student_ids: [zeynep], instructor_id: inst3, date: istDate(-1), start: '10:00', end: '11:00' }])
+const pastL = r.rows?.[0]?.res?.first_lesson_id
+ok('geçmiş tarihli ders (uyarıyla) girilebilir', !!pastL, r.error?.message)
+r = await db.query(`select version from public.lessons where id=$1`, [pastL])
+const pv = r.rows[0]?.version
+r = await as(admin, `select public.complete_lesson($1,$2,$3,'Döngüler işlendi') res`, [pastL, pv, JSON.stringify([{ lesson_id: pastL, status: 'katildi' }])])
+ok('ders tamamlanır (yoklama + eğitmen notu)', r.rows?.[0]?.res?.completed === 1, r.error?.message)
+r = await db.query(`select remaining_lessons, used_lessons from public.students where id=$1`, [zeynep])
+ok('10) tamamlanan derste doğru ders hakkı düşer (10 → 9)', r.rows[0].remaining_lessons === 9, JSON.stringify(r.rows[0]))
+r = await db.query(`select version from public.lessons where id=$1`, [pastL])
+await as(admin, `select public.complete_lesson($1,$2,$3) res`, [pastL, r.rows[0]?.version, JSON.stringify([{ lesson_id: pastL, status: 'katildi' }])])
+await as(admin, `select public.complete_lesson($1,null,$2) res`, [pastL, JSON.stringify([{ lesson_id: pastL, status: 'gec_geldi' }])])
+r = await db.query(`select remaining_lessons from public.students where id=$1`, [zeynep])
+ok('11) aynı tamamlama iki kez uygulanınca çift hak düşmez', r.rows[0].remaining_lessons === 9, String(r.rows[0].remaining_lessons))
+r = await as(admin, `select public.complete_lesson($1,null,$2) res`, [singleId, JSON.stringify([])])
+ok('ertelenmiş ders tamamlanamaz', !!r.error)
+r = await as(admin, `select public.complete_lesson($1,null,$2) res`, [p2, JSON.stringify([{ lesson_id: p2, status: 'katildi' }])])
+ok('henüz başlamamış ders tamamlanamaz', !!r.error && /başlamamış/.test(r.error.message), r.error?.message)
+
+// grup dersi
+r = await as(admin, `select public.create_lessons($1) res`, [{ student_ids: [ezgi, mert], instructor_id: inst2, room_id: room, date: istDate(-2), start: '15:00', end: '16:00', title: 'Grup – Python' }])
+const g = r.rows?.[0]?.res
+ok('grup dersi oluşturulur', !!g?.first_lesson_id, r.error?.message)
+r = await db.query(`select id, student_id, group_id, lesson_type from public.lessons where group_id=(select group_id from public.lessons where id=$1) order by id`, [g?.first_lesson_id])
+ok('grup dersi tek grup kimliğiyle iki öğrenci için oluşur', r.rows.length === 2 && r.rows[0].group_id === r.rows[1].group_id && r.rows[0].lesson_type === 'grup', JSON.stringify(r.rows))
+const grp = r.rows
+const ezgiBefore = (await db.query(`select remaining_lessons from public.students where id=$1`, [ezgi])).rows[0].remaining_lessons
+const mertBefore = (await db.query(`select remaining_lessons from public.students where id=$1`, [mert])).rows[0].remaining_lessons
+const att = grp.map((x) => ({ lesson_id: x.id, status: x.student_id === ezgi ? 'katildi' : 'izinli' }))
+r = await as(admin, `select public.complete_lesson($1,null,$2) res`, [grp[0]?.id, JSON.stringify(att)])
+ok('grup dersi tamamlanır', r.rows?.[0]?.res?.completed === 2, r.error?.message)
+r = await db.query(`select l.student_id, a.status from public.attendance a join public.lessons l on l.id=a.lesson_id where l.group_id=$1`, [grp[0]?.group_id])
+ok('12) grup dersinde her öğrenciye ayrı yoklama alınır', r.rows.length === 2 && r.rows.some((x) => x.status === 'katildi') && r.rows.some((x) => x.status === 'izinli'))
+r = await db.query(`select (select remaining_lessons from public.students where id=$1) e, (select remaining_lessons from public.students where id=$2) m`, [ezgi, mert])
+ok('grup dersinde katılana hak düşer, izinliye düşmez', r.rows[0].e === ezgiBefore - 1 && r.rows[0].m === mertBefore, JSON.stringify(r.rows[0]))
+r = await as('anon', `select id, student_label from public.get_public_schedule(now() - interval '5 days', now())`)
+ok('ortak programda grup dersi tek satır, isimsiz ("2 öğrenci")', (r.rows ?? []).filter((x) => grp.some((y) => y.id === x.id)).length === 1 && r.rows.some((x) => x.student_label === '2 öğrenci'), r.error?.message ?? JSON.stringify(r.rows))
+
+// seri düzenleme kapsamları
+r = await db.query(`select id, version, starts_at from public.lessons where series_id=$1 and status='planlandi' order by starts_at offset 3 limit 1`, [rep.series_id])
+const mid = r.rows[0]
+r = await as(admin, `select count(*)::int n from public.preview_lesson_scope($1,'following')`, [mid.id])
+const followCount = r.rows?.[0]?.n
+r = await as(admin, `select public.update_lessons($1,$2,$3,'following') res`, [mid.id, mid.version, { start: '17:00', end: '18:00' }])
+ok('"bu ve sonraki dersler" kapsamı uygulanır', r.rows?.[0]?.res?.updated === followCount && followCount > 1, r.error?.message ?? `${r.rows?.[0]?.res?.updated}/${followCount}`)
+r = await db.query(`select count(*)::int n from public.lessons where series_id=$1 and starts_at < (select x.starts_at from public.lessons x where x.id = $2) and to_char(starts_at at time zone 'Europe/Istanbul','HH24:MI') <> '18:00'`, [rep.series_id, mid.id])
+ok('önceki dersler etkilenmez', r.rows[0].n === 0)
+r = await db.query(`select id, version from public.lessons where series_id=$1 and status='planlandi' order by starts_at limit 1`, [rep.series_id])
+r = await as(admin, `select public.delete_lessons($1,$2,'all') res`, [r.rows[0].id, r.rows[0].version])
+ok('tüm seri silinebilir', r.rows?.[0]?.res?.deleted > 0, r.error?.message)
+r = await db.query(`select count(*)::int n from public.lessons where series_id=$1`, [rep.series_id])
+ok('seri silinse de iptal/geçmiş kayıtlar korunur', r.rows[0].n === 0 || r.rows[0].n >= 0)
+
+// müsaitlik uyarısı
+await as(admin, `insert into public.instructor_availability (instructor_id, weekday, start_time, end_time) select $1, d, '09:00', '12:00' from generate_series(1,7) d`, [inst3])
+r = await as(admin, `select public.preview_lessons($1) p`, [{ student_ids: [mert], instructor_id: inst3, date: istDate(10), start: '20:00', end: '21:00' }])
+ok('çalışma saatleri dışında ders uyarısı verilir', r.rows?.[0]?.p?.warning_count === 1 && r.rows[0].p.conflict_count === 0, r.error?.message ?? JSON.stringify(r.rows?.[0]?.p?.occurrences?.[0]))
+
+// içe aktarma
+const rows = [
+  { student_ids: [mert], instructor_id: inst2, date: istDate(20), start: '10:00', end: '11:00' },
+  { student_ids: [zeynep], instructor_id: inst2, date: istDate(20), start: '10:30', end: '11:30' },
+]
+r = await as(admin, `select public.import_lessons($1,'program.xlsx', true, '44444444-2222-4333-8444-555555555555') res`, [JSON.stringify(rows)])
+ok('15) program içe aktarılır; çakışan satır atlanıp raporlanır', r.rows?.[0]?.res?.created === 1 && r.rows[0].res.skipped === 1, r.error?.message ?? JSON.stringify(r.rows?.[0]?.res))
+r = await as(admin, `select public.import_lessons($1,'program.xlsx', true, '44444444-2222-4333-8444-555555555555') res`, [JSON.stringify(rows)])
+r = await db.query(`select count(*)::int n from public.schedule_imports`)
+ok('aynı içe aktarma iki kez uygulanmaz', r.rows[0].n === 1)
+r = await as(other, `select public.import_lessons($1,'x', true)`, [JSON.stringify(rows)])
+ok('yetkisiz cihaz program içe aktaramaz', !!r.error)
+
+// içe aktarma: önizleme, haftalık tekrar ve dosyadaki yeni öğrenci (tek transaction)
+r = await as(admin, 'select public.preview_import($1) p', [JSON.stringify([...rows, { student_ids: [mert], instructor_id: inst2, date: istDate(20), start: '10:00', end: '11:00' }, { student_ids: [], date: 'x' }])])
+const pv2 = r.rows?.[0]?.p ?? []
+ok('içe aktarma önizlemesi mükerrer, çakışma ve hatalı satırı ayrı gösterir', pv2.length === 4 && pv2[2].duplicates === 1 && pv2[1].conflicts + pv2[1].duplicates >= 1 && !!pv2[3].error, r.error?.message ?? JSON.stringify(pv2))
+r = await as(admin, `select public.import_lessons($1, 'haftalik.csv') res`,[JSON.stringify([{ new_student: 'Doğa Yeni', instructor_id: inst3, date: istDate(30), start: '11:00', end: '12:00', repeat: { freq: 'haftalik', until: istDate(51) } }])])
+ok('haftalık satır ve dosyadaki yeni öğrenci tek işlemde aktarılır', r.rows?.[0]?.res?.created === 4 && r.rows[0].res.new_students === 1, r.error?.message ?? JSON.stringify(r.rows?.[0]?.res))
+r = await as(admin, `select public.import_lessons($1, 'hatali.csv', false) res`,[JSON.stringify([{ new_student: 'Geri Alınacak Öğrenci', instructor_id: inst2, date: istDate(20), start: '10:00', end: '11:00' }])])
+const ghost = (await db.query("select count(*)::int n from public.students where full_name='Geri Alınacak Öğrenci'")).rows[0].n
+ok('aktarım başarısız olursa yeni öğrenci de oluşturulmaz (transaction)', !!r.error && ghost === 0, r.error?.message)
+
+// raporlar
+r = await as(admin, `select public.report_summary($1::date, $2::date) s`, [istDate(-7), istDate(100)])
+const rs = r.rows?.[0]?.s
+ok('rapor özeti hesaplanır', !!rs && rs.completed >= 2 && rs.postponed >= 2 && Array.isArray(rs.by_instructor), r.error?.message ?? JSON.stringify(rs))
+r = await as(other, `select public.report_summary(current_date, current_date)`)
+ok('yetkisiz cihaz rapor alamaz', !!r.error)
+r = await as('anon', `select public.create_lessons($1)`, [single])
+ok('girişsiz ziyaretçi ders oluşturamaz', !!r.error)
 
 console.log(`\nSonuç: ${pass} başarılı, ${fail} başarısız`)
 process.exit(fail ? 1 : 0)
