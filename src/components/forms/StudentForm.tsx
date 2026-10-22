@@ -83,7 +83,8 @@ export function StudentFormSheet({ open, onClose, student, onSaved, quick }: {
             {instructors?.filter((i) => i.is_active || i.id === student?.instructor_id).map((i) => <option key={i.id} value={i.id}>{i.full_name}</option>)}
           </Select>
         </Field>
-        <Field label="Toplam ders hakkı" error={errors.total_lessons?.message}>
+        <Field label={student ? 'Toplam ders hakkı' : 'Başlangıç ders paketi (ders)'} error={errors.total_lessons?.message}
+          hint={student ? 'Değişiklik "Elle düzeltme" hareketi olarak kaydedilir. Yeni paket için profilde "Ders hakları" sekmesini kullanın.' : 'Başlangıç paketi olarak kaydedilir.'}>
           <Input type="number" inputMode="numeric" min={0} {...register('total_lessons')} />
         </Field>
         <Field label="Toplam kurs ücreti (₺)" error={errors.total_fee?.message}>

@@ -20,8 +20,10 @@ import { StudentFormSheet } from '@/components/forms/StudentForm'
 import { LessonFormSheet } from '@/components/forms/LessonForm'
 import { LessonRow, LessonSheet } from '@/components/forms/LessonActions'
 import { PaymentFormSheet, InstallmentPlanSheet, VoidPaymentSheet } from '@/components/forms/PaymentForms'
+import { CreditsTab, AttendanceTab } from '@/components/forms/PackageForms'
+import { collapseGroups } from '@/lib/lessons'
 
-type Tab = 'dersler' | 'program' | 'odeme' | 'notlar' | 'bilgi'
+type Tab = 'bilgi' | 'program' | 'gecmis' | 'yoklama' | 'haklar' | 'odeme' | 'notlar'
 
 export function StudentDetailPage() {
   const { id } = useParams()
@@ -31,7 +33,7 @@ export function StudentDetailPage() {
   const lessonsQ = useStudentLessons(id)
   const { data: instructors } = useInstructors()
   const { data: courses } = useCourses()
-  const [tab, setTab] = useState<Tab>('dersler')
+  const [tab, setTab] = useState<Tab>('program')
   const [editing, setEditing] = useState(false)
   const [newLesson, setNewLesson] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -65,11 +67,13 @@ export function StudentDetailPage() {
   }
 
   const tabs: { value: Tab; label: string }[] = [
-    { value: 'dersler', label: 'Dersler' },
-    { value: 'program', label: 'Program' },
-    ...(can.payments ? [{ value: 'odeme' as Tab, label: 'Ödeme' }] : []),
+    { value: 'bilgi', label: 'Genel' },
+    { value: 'program', label: 'Ders programı' },
+    { value: 'gecmis', label: 'Ders geçmişi' },
+    { value: 'yoklama', label: 'Yoklama' },
+    { value: 'haklar', label: 'Ders hakları' },
+    ...(can.payments ? [{ value: 'odeme' as Tab, label: 'Ödemeler' }] : []),
     { value: 'notlar', label: 'Notlar' },
-    { value: 'bilgi', label: 'Bilgi' },
   ]
 
   return (
@@ -109,19 +113,26 @@ export function StudentDetailPage() {
 
       <div className="mb-4 overflow-x-auto"><Segmented value={tab} onChange={setTab} options={tabs} /></div>
 
-      {tab === 'dersler' && (
+      {tab === 'program' && (
         <div>
-          <h3 className="mb-2 text-sm font-bold text-slate-500">Yaklaşan ({upcoming.length})</h3>
+          <h3 className="mb-2 text-sm font-bold text-slate-500">Yaklaşan dersler ({upcoming.length})</h3>
           {upcoming.length === 0 ? <Card className="mb-4 p-4 text-sm text-slate-500">Planlı ders yok.</Card> : (
-            <div className="mb-5 space-y-2">{upcoming.map((l) => <LessonRow key={l.id} lesson={l} showDate onClick={() => setSelectedId(l.id)} />)}</div>
+            <div className="mb-5 space-y-2">{collapseGroups(upcoming).map((l) => <LessonRow key={l.id} lesson={l} showDate onClick={() => setSelectedId(l.id)} />)}</div>
           )}
-          <h3 className="mb-2 text-sm font-bold text-slate-500">Geçmiş ({history.length})</h3>
-          {history.length === 0 ? <Card className="p-4 text-sm text-slate-500">Henüz geçmiş ders yok.</Card> : (
-            <div className="space-y-2">{history.map((l) => <LessonRow key={l.id} lesson={l} showDate showAttendance={false} onClick={() => setSelectedId(l.id)} />)}</div>
-          )}
+          <h3 className="mb-2 mt-5 text-sm font-bold text-slate-500">Haftalık program (eski kayıtlar)</h3>
+          <ScheduleTab studentId={s.id} defaultInstructor={s.instructor_id} />
         </div>
       )}
-      {tab === 'program' && <ScheduleTab studentId={s.id} defaultInstructor={s.instructor_id} />}
+      {tab === 'gecmis' && (
+        history.length === 0 ? <Card className="p-4 text-sm text-slate-500">Henüz geçmiş ders yok.</Card> : (
+          <div className="space-y-2">
+            <p className="mb-1 text-xs text-slate-500">Ertelenen dersin eski tarihi "Ertelendi", yeni tarihi ayrı satır olarak görünür.</p>
+            {history.map((l) => <LessonRow key={l.id} lesson={l} showDate showAttendance={false} onClick={() => setSelectedId(l.id)} />)}
+          </div>
+        )
+      )}
+      {tab === 'yoklama' && <AttendanceTab lessons={lessons} />}
+      {tab === 'haklar' && <CreditsTab student={s} lessons={lessons} />}
       {tab === 'odeme' && can.payments && <PaymentsTab studentId={s.id} studentName={s.full_name} totalFee={Number(s.total_fee)} />}
       {tab === 'notlar' && <NotesTab studentId={s.id} />}
       {tab === 'bilgi' && (
