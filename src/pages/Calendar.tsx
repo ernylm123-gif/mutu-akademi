@@ -1,23 +1,30 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import clsx from 'clsx'
 import { ChevronLeft, ChevronRight, Plus, CalendarDays, Move, Upload, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { DndContext, PointerSensor, TouchSensor, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
 import { useAuth } from '@/hooks/useAuth'
-import { useInstructors, useLessons, useDbMutation, updateVersioned, useStudents, useCourses } from '@/lib/api'
+import { useInstructors, useLessons, useDbMutation, useStudents, useCourses, useRooms, planRpc, LESSON_INVALIDATE } from '@/lib/api'
 import {
   addDays, addMonths, dateKey, formatDayLong, fromIstanbul, istanbulParts, minutesBetween, monthGrid, MONTHS,
   startOfMonth, startOfWeek, timeHM, WEEKDAYS_SHORT,
 } from '@/lib/time'
 import { ATTENDANCE_STATUS } from '@/lib/format'
-import type { LessonWithRelations } from '@/types/db'
-import { Button, Card, EmptyState, ErrorBox, PageLoader, Segmented, Select } from '@/components/ui'
+import { collapseGroups, memberLabel, type LessonItem } from '@/lib/lessons'
+import type { LessonStatus, LessonWithRelations } from '@/types/db'
+import { Button, Card, EmptyState, ErrorBox, Input, PageLoader, Segmented, Select } from '@/components/ui'
 import { PageHeader } from '@/components/layout/AppShell'
 import { LessonRow, LessonSheet } from '@/components/forms/LessonActions'
 import { LessonFormSheet } from '@/components/forms/LessonForm'
 
-type View = 'gun' | 'hafta' | 'ay'
+type View = 'gun' | 'hafta' | 'ay' | 'liste' | 'egitmen' | 'sinif'
+const FILTER_KEY = 'mutu-takvim-filtre'
+interface Filters { instr: string; student: string; course: string; room: string; status: string }
+function loadFilters(): Filters {
+  try { return { instr: '', student: '', course: '', room: '', status: '', ...JSON.parse(localStorage.getItem(FILTER_KEY) ?? '{}') } }
+  catch { return { instr: '', student: '', course: '', room: '', status: '' } }
+}
 const START_HOUR = 7
 const END_HOUR = 23
 const SLOT_MIN = 30
@@ -28,33 +35,39 @@ export function CalendarPage() {
   const [params, setParams] = useSearchParams()
   const [view, setView] = useState<View>(() => (params.get('gorunum') as View) || (window.innerWidth >= 1024 ? 'hafta' : 'gun'))
   const [cursor, setCursor] = useState(params.get('tarih') || dateKey())
-  const [instr, setInstr] = useState('')
+  // Son kullanılan filtreler uygulama yeniden açıldığında korunur
+  const [f, setF] = useState<Filters>(() => ({ ...loadFilters(), ...(params.get('ogrenci') ? { student: params.get('ogrenci')! } : {}) }))
+  useEffect(() => { try { localStorage.setItem(FILTER_KEY, JSON.stringify(f)) } catch { /* yoksay */ } }, [f])
+  const setFilter = (p: Partial<Filters>) => setF((x) => ({ ...x, ...p }))
+  const instr = f.instr
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [creating, setCreating] = useState<{ date: string; time?: string } | null>(null)
   const { data: instructors } = useInstructors()
   const { data: students } = useStudents()
   const { data: courses } = useCourses()
+  const { data: rooms } = useRooms()
   const navigate = useNavigate()
-  const [studentF, setStudentF] = useState(params.get('ogrenci') ?? '')
-  const [courseF, setCourseF] = useState('')
 
   const range = useMemo(() => {
-    if (view === 'gun') return [cursor, addDays(cursor, 1)]
-    if (view === 'hafta') { const s = startOfWeek(cursor); return [s, addDays(s, 7)] }
+    if (view === 'gun' || view === 'egitmen' || view === 'sinif') return [cursor, addDays(cursor, 1)]
+    if (view === 'hafta' || view === 'liste') { const s = startOfWeek(cursor); return [s, addDays(s, 7)] }
     const g = monthGrid(cursor); return [g[0], addDays(g[41], 1)]
   }, [view, cursor])
 
   const filterInstr = can.instructor ? instructorId : instr || null
   const q = useLessons(fromIstanbul(range[0]).toISOString(), fromIstanbul(range[1]).toISOString(), { instructorId: filterInstr })
-  const lessons = useMemo(
-    () => (q.data ?? []).filter((l) => (!studentF || l.student_id === studentF) && (!courseF || l.course_id === courseF)),
-    [q.data, studentF, courseF],
+  const rawLessons = useMemo(
+    () => (q.data ?? []).filter((l) => (!f.student || l.student_id === f.student) && (!f.course || l.course_id === f.course)
+      && (!f.room || l.room_id === f.room) && (!f.status || l.status === (f.status as LessonStatus))),
+    [q.data, f],
   )
-  const filtered = !!(instr || studentF || courseF)
-  const selected = lessons.find((l) => l.id === selectedId) ?? null
+  // Grup dersleri tek kart; filtre öğrenciye göreyse yalnızca o öğrencinin satırı kalır
+  const lessons = useMemo(() => collapseGroups(rawLessons), [rawLessons])
+  const filtered = !!(instr || f.student || f.course || f.room || f.status)
+  const selected = (q.data ?? []).find((l) => l.id === selectedId) ?? null
 
   const move = (dir: number) => {
-    const next = view === 'gun' ? addDays(cursor, dir) : view === 'hafta' ? addDays(cursor, dir * 7) : addMonths(cursor, dir)
+    const next = view === 'hafta' || view === 'liste' ? addDays(cursor, dir * 7) : view === 'ay' ? addMonths(cursor, dir) : addDays(cursor, dir)
     setCursor(next)
     setParams({ tarih: next, gorunum: view }, { replace: true })
   }
@@ -62,8 +75,9 @@ export function CalendarPage() {
     setView(v)
     setParams({ tarih: cursor, gorunum: v }, { replace: true })
   }
-  const title = view === 'gun' ? formatDayLong(cursor)
-    : view === 'hafta' ? (() => { const s = startOfWeek(cursor); const e = addDays(s, 6); return `${Number(s.slice(8))} ${MONTHS[Number(s.slice(5, 7)) - 1]} – ${Number(e.slice(8))} ${MONTHS[Number(e.slice(5, 7)) - 1]}` })()
+  const goTo = (d: string) => { if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return; setCursor(d); setParams({ tarih: d, gorunum: view }, { replace: true }) }
+  const title = view === 'gun' || view === 'egitmen' || view === 'sinif' ? formatDayLong(cursor)
+    : view === 'hafta' || view === 'liste' ? (() => { const s = startOfWeek(cursor); const e = addDays(s, 6); return `${Number(s.slice(8))} ${MONTHS[Number(s.slice(5, 7)) - 1]} – ${Number(e.slice(8))} ${MONTHS[Number(e.slice(5, 7)) - 1]}` })()
     : `${MONTHS[Number(cursor.slice(5, 7)) - 1]} ${cursor.slice(0, 4)}`
 
   return (
@@ -73,30 +87,47 @@ export function CalendarPage() {
         <Button icon={<Plus className="size-4" />} onClick={() => setCreating({ date: cursor })}>Ders oluştur</Button>
       </>} />
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <Segmented value={view} onChange={changeView} options={[{ value: 'gun', label: 'Gün' }, { value: 'hafta', label: 'Hafta' }, { value: 'ay', label: 'Ay' }]} />
+        <div className="max-w-full overflow-x-auto">
+          <Segmented value={view} onChange={changeView} options={[
+            { value: 'gun', label: 'Gün' }, { value: 'hafta', label: 'Hafta' }, { value: 'ay', label: 'Ay' }, { value: 'liste', label: 'Liste' },
+            ...(can.staff ? [{ value: 'egitmen' as View, label: 'Eğitmen' }] : []), { value: 'sinif', label: 'Sınıf' },
+          ]} />
+        </div>
         <div className="flex items-center gap-1">
           <Button size="sm" variant="secondary" onClick={() => move(-1)} aria-label="Önceki"><ChevronLeft className="size-4" /></Button>
-          <Button size="sm" variant="secondary" onClick={() => { setCursor(dateKey()); setParams({ tarih: dateKey(), gorunum: view }, { replace: true }) }}>Bugün</Button>
+          <Button size="sm" variant="secondary" onClick={() => goTo(dateKey())}>Bugüne dön</Button>
           <Button size="sm" variant="secondary" onClick={() => move(1)} aria-label="Sonraki"><ChevronRight className="size-4" /></Button>
+          <Input type="date" aria-label="Tarihe git" value={cursor} onChange={(e) => goTo(e.target.value)} className="h-10 w-40 text-sm" />
         </div>
       </div>
       <div className="-mt-2 mb-4 flex gap-2 overflow-x-auto pb-1">
         {can.staff && (
-          <Select value={instr} onChange={(e) => setInstr(e.target.value)} className="h-10 w-44 shrink-0 text-sm" aria-label="Eğitmen filtresi">
+          <Select value={instr} onChange={(e) => setFilter({ instr: e.target.value })} className="h-10 w-44 shrink-0 text-sm" aria-label="Eğitmen filtresi">
             <option value="">Tüm eğitmenler</option>
             {instructors?.map((i) => <option key={i.id} value={i.id}>{i.full_name}</option>)}
           </Select>
         )}
-        <Select value={studentF} onChange={(e) => setStudentF(e.target.value)} className="h-10 w-44 shrink-0 text-sm" aria-label="Öğrenci filtresi">
+        <Select value={f.student} onChange={(e) => setFilter({ student: e.target.value })} className="h-10 w-44 shrink-0 text-sm" aria-label="Öğrenci filtresi">
           <option value="">Tüm öğrenciler</option>
-          {students?.filter((s) => s.is_active || s.id === studentF).map((s) => <option key={s.id} value={s.id}>{s.full_name}</option>)}
+          {students?.filter((s) => s.is_active || s.id === f.student).map((s) => <option key={s.id} value={s.id}>{s.full_name}</option>)}
         </Select>
-        <Select value={courseF} onChange={(e) => setCourseF(e.target.value)} className="h-10 w-40 shrink-0 text-sm" aria-label="Kurs filtresi">
+        <Select value={f.course} onChange={(e) => setFilter({ course: e.target.value })} className="h-10 w-40 shrink-0 text-sm" aria-label="Kurs filtresi">
           <option value="">Tüm kurslar</option>
           {courses?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </Select>
+        <Select value={f.room} onChange={(e) => setFilter({ room: e.target.value })} className="h-10 w-40 shrink-0 text-sm" aria-label="Sınıf filtresi">
+          <option value="">Tüm sınıflar</option>
+          {rooms?.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+        </Select>
+        <Select value={f.status} onChange={(e) => setFilter({ status: e.target.value })} className="h-10 w-36 shrink-0 text-sm" aria-label="Durum filtresi">
+          <option value="">Tüm durumlar</option>
+          <option value="planlandi">Planlandı</option>
+          <option value="tamamlandi">Tamamlandı</option>
+          <option value="ertelendi">Ertelendi</option>
+          <option value="iptal">İptal edildi</option>
+        </Select>
         {filtered && (
-          <Button size="sm" variant="ghost" className="h-10 shrink-0" icon={<X className="size-4" />} onClick={() => { setInstr(''); setStudentF(''); setCourseF('') }}>Temizle</Button>
+          <Button size="sm" variant="ghost" className="h-10 shrink-0" icon={<X className="size-4" />} onClick={() => setF({ instr: '', student: '', course: '', room: '', status: '' })}>Temizle</Button>
         )}
       </div>
       <h2 className="mb-3 text-lg font-bold">{title}</h2>
@@ -110,10 +141,68 @@ export function CalendarPage() {
           )}
           {view === 'hafta' && <WeekGrid start={startOfWeek(cursor)} lessons={lessons} onOpen={setSelectedId} onCreate={(date, time) => can.lessons && setCreating({ date, time })} draggable={can.lessons} />}
           {view === 'ay' && <MonthGrid cursor={cursor} lessons={lessons} onPick={(d) => { setCursor(d); changeView('gun') }} />}
+          {view === 'liste' && (
+            lessons.length === 0 ? <Card><EmptyState icon={<CalendarDays className="size-6" />} title="Bu hafta ders yok" /></Card> : (
+              <div className="space-y-5">
+                {Array.from({ length: 7 }, (_, i) => addDays(startOfWeek(cursor), i)).map((d) => {
+                  const items = lessons.filter((l) => dateKey(l.starts_at) === d)
+                  if (!items.length) return null
+                  return (
+                    <section key={d}>
+                      <h3 className={clsx('mb-2 px-1 text-xs font-bold uppercase tracking-wide', d === dateKey() ? 'text-brand-600' : 'text-slate-500')}>{formatDayLong(d)}</h3>
+                      <div className="space-y-2.5">{items.map((l) => <LessonRow key={l.id} lesson={l} onClick={() => setSelectedId(l.id)} />)}</div>
+                    </section>
+                  )
+                })}
+              </div>
+            )
+          )}
+          {(view === 'egitmen' || view === 'sinif') && (
+            <ColumnsView
+              columns={view === 'egitmen'
+                ? [...(instructors ?? []).filter((i) => i.is_active || lessons.some((l) => l.instructor_id === i.id)).map((i) => ({ id: i.id, name: i.full_name, color: i.color })), { id: '', name: 'Eğitmen atanmamış', color: '#94a3b8' }]
+                : [...(rooms ?? []).filter((r) => r.is_active || lessons.some((l) => l.room_id === r.id)).map((r) => ({ id: r.id, name: r.name + (r.capacity ? ` (${r.capacity})` : ''), color: '#2563eb' })), { id: '', name: 'Sınıfsız / online', color: '#94a3b8' }]}
+              lessons={lessons}
+              keyOf={(l) => (view === 'egitmen' ? l.instructor_id : l.room_id) ?? ''}
+              onOpen={setSelectedId}
+            />
+          )}
         </>
       )}
       <LessonSheet lesson={selected} onClose={() => setSelectedId(null)} />
       <LessonFormSheet open={!!creating} onClose={() => setCreating(null)} defaults={creating ? { date: creating.date, time: creating.time, instructor_id: instr || undefined } : undefined} />
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Eğitmen / sınıf bazlı günlük görünüm
+// ---------------------------------------------------------------------------
+function ColumnsView({ columns, lessons, keyOf, onOpen }: {
+  columns: { id: string; name: string; color: string }[]; lessons: LessonItem[]; keyOf: (l: LessonItem) => string; onOpen: (id: string) => void
+}) {
+  const visible = columns.filter((c) => c.id !== '' || lessons.some((l) => keyOf(l) === ''))
+  if (lessons.length === 0) return <Card><EmptyState icon={<CalendarDays className="size-6" />} title="Bu gün ders yok" /></Card>
+  return (
+    <div className="flex snap-x gap-3 overflow-x-auto pb-2">
+      {visible.map((c) => {
+        const items = lessons.filter((l) => keyOf(l) === c.id)
+        return (
+          <section key={c.id || 'none'} className="w-[78vw] max-w-72 shrink-0 snap-start sm:w-64">
+            <h3 className="mb-2 flex items-center gap-2 px-1 text-sm font-bold"><span className="size-2.5 rounded-full" style={{ background: c.color }} />{c.name}<span className="ml-auto text-xs font-medium text-slate-400">{items.length}</span></h3>
+            <div className="space-y-2">
+              {items.length === 0 && <p className="rounded-2xl border border-dashed border-slate-200 p-3 text-center text-xs text-slate-400">Boş</p>}
+              {items.map((l) => (
+                <button key={l.id} onClick={() => onOpen(l.id)} className={clsx('card block w-full p-3 text-left', (l.status === 'iptal' || l.status === 'ertelendi') && 'opacity-50')}>
+                  <span className="block text-sm font-bold tabular-nums">{timeHM(l.starts_at)}–{timeHM(l.ends_at)}</span>
+                  <span className="block truncate text-sm font-semibold">{memberLabel(l)}</span>
+                  <span className="block truncate text-xs text-slate-500">{l.title || l.course?.name || '—'}{l.room ? ` · ${l.room.name}` : ''}</span>
+                </button>
+              ))}
+            </div>
+          </section>
+        )
+      })}
     </div>
   )
 }
@@ -130,14 +219,14 @@ function WeekGrid({ start, lessons, onOpen, onCreate, draggable }: {
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 300, tolerance: 6 } }),
   )
+  // Taşıma sunucuda çakışma kontrollü yapılır; grup dersinin tüm öğrencileri birlikte taşınır
   const moveLesson = useDbMutation(
     ({ lesson, start: s }: { lesson: LessonWithRelations; start: Date }) => {
       const dur = minutesBetween(lesson.starts_at, lesson.ends_at)
-      return updateVersioned('lessons', lesson.id, lesson.version, {
-        starts_at: s.toISOString(), ends_at: new Date(s.getTime() + dur * 60000).toISOString(),
-      })
+      const e = new Date(s.getTime() + dur * 60000)
+      return planRpc.update(lesson, { date: dateKey(s), start: timeHM(s), end: timeHM(e) }, 'this')
     },
-    { success: (_r, v) => `Ders ${timeHM(v.start)} saatine taşındı`, invalidate: ['lessons', 'student-lessons'] },
+    { success: (_r, v) => `Ders ${timeHM(v.start)} saatine taşındı`, invalidate: LESSON_INVALIDATE },
   )
 
   const onDragEnd = (e: DragEndEvent) => {
@@ -212,7 +301,7 @@ function WeekLesson({ lesson, onOpen, draggable }: { lesson: LessonWithRelations
       className={clsx('absolute inset-x-0.5 z-[1] overflow-hidden rounded-lg px-1.5 py-1 text-left text-[11px] leading-tight text-white shadow-sm', faded && 'opacity-40', isDragging && 'z-20 shadow-xl ring-2 ring-white', draggable && 'touch-none')}
       style={{ top, height, background: color, transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined }}
     >
-      <span className="block font-semibold">{timeHM(lesson.starts_at)} {lesson.student?.full_name}</span>
+      <span className="block font-semibold">{timeHM(lesson.starts_at)} {memberLabel(lesson)}</span>
       {height > 34 && <span className="block truncate opacity-90">{lesson.attendance ? ATTENDANCE_STATUS[lesson.attendance.status].label : lesson.instructor?.full_name}</span>}
     </button>
   )
@@ -247,7 +336,7 @@ function MonthGrid({ cursor, lessons, onPick }: { cursor: string; lessons: Lesso
                   <span className="hidden w-full space-y-0.5 sm:block">
                     {active.slice(0, 3).map((l) => (
                       <span key={l.id} className="block truncate rounded px-1 text-[10px] font-medium text-white" style={{ background: l.instructor?.color ?? '#29a8df' }}>
-                        {timeHM(l.starts_at)} {l.student?.full_name}
+                        {timeHM(l.starts_at)} {memberLabel(l)}
                       </span>
                     ))}
                     {active.length > 3 && <span className="block text-[10px] text-slate-500">+{active.length - 3} ders</span>}

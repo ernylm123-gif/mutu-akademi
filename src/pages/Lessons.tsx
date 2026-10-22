@@ -5,6 +5,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useCourses, useInstructors, useLessons, useStudents } from '@/lib/api'
 import { addDays, dateKey, formatDayLong, fromIstanbul } from '@/lib/time'
 import { matchesSearch } from '@/lib/format'
+import { collapseGroups } from '@/lib/lessons'
 import { Button, Card, EmptyState, ErrorBox, Input, PageLoader, Segmented, Select } from '@/components/ui'
 import { PageHeader } from '@/components/layout/AppShell'
 import { LessonRow, LessonSheet } from '@/components/forms/LessonActions'
@@ -35,8 +36,8 @@ export function LessonsPage() {
     const ls = (lessonsQ.data ?? []).filter((l) =>
       (tab === 'yaklasan' ? new Date(l.ends_at).getTime() >= now && l.status === 'planlandi' : new Date(l.starts_at).getTime() < now) &&
       (!student || l.student_id === student) && (!instructor || l.instructor_id === instructor) && (!course || l.course_id === course) &&
-      matchesSearch([l.student?.full_name, l.course?.name, l.instructor?.full_name], q))
-    return tab === 'gecmis' ? [...ls].reverse() : ls
+      matchesSearch([l.student?.full_name, l.course?.name, l.instructor?.full_name, l.title, l.room?.name], q))
+    return collapseGroups(tab === 'gecmis' ? [...ls].reverse() : ls)
   }, [lessonsQ.data, tab, student, instructor, course, q, now])
 
   const groups = useMemo(() => {
@@ -45,7 +46,7 @@ export function LessonsPage() {
     return [...m.entries()]
   }, [list])
   const filtered = !!(student || instructor || course || q)
-  const selected = list.find((l) => l.id === selectedId) ?? null
+  const selected = (lessonsQ.data ?? []).find((l) => l.id === selectedId) ?? null
 
   return (
     <div>
