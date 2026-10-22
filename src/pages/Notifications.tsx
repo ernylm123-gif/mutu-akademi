@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { usePush } from '@/hooks/usePush'
 import clsx from 'clsx'
-import { Bell, BellRing, Settings2, CheckCheck, UserPlus, CalendarClock, Ban, UserX, AlertTriangle, Wallet, Megaphone } from 'lucide-react'
+import { Bell, BellRing, Settings2, CheckCheck, UserPlus, CalendarClock, Ban, UserX, AlertTriangle, Wallet, Megaphone, CalendarPlus } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useNotifications, useDbMutation, rpc } from '@/lib/api'
 import { supabase } from '@/lib/supabase'
@@ -19,6 +19,7 @@ const ICONS: Record<string, { icon: typeof Bell; cls: string }> = {
   dusuk_ders_hakki: { icon: AlertTriangle, cls: 'bg-amber-50 text-amber-600 dark:bg-amber-500/15' },
   yaklasan_odeme: { icon: Wallet, cls: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15' },
   duyuru: { icon: Megaphone, cls: 'bg-brand-50 text-brand-600' },
+  ders_yeni: { icon: CalendarPlus, cls: 'bg-emerald-50 text-emerald-600' },
   gecikmis_odeme: { icon: Wallet, cls: 'bg-red-50 text-red-600 dark:bg-red-500/15' },
 }
 

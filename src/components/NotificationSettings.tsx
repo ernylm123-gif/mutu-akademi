@@ -16,6 +16,7 @@ const GROUPS: { title: string; items: { key: keyof NotificationPrefs; label: str
     { key: 'lesson_15', label: 'Dersten 15 dakika önce' },
     { key: 'ders_iptal', label: 'Ders iptal edildiğinde', important: true },
     { key: 'ders_degisiklik', label: 'Ders ertelendiğinde / saati değiştiğinde', important: true },
+    { key: 'ders_yeni', label: 'Yeni ders oluşturulduğunda / program içe aktarıldığında' },
   ] },
   { title: 'Öğrenci', items: [
     { key: 'yeni_ogrenci', label: 'Yeni öğrenci kaydı' },

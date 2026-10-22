@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { paymentSchema, installmentPlanSchema, splitInstallments, type PaymentFormInput, type PaymentFormValues, type InstallmentPlanInput } from '@/lib/schemas'
-import { useDbMutation, insertRow, updateVersioned } from '@/lib/api'
+import { useDbMutation, insertRow, updateVersioned, newRequestId } from '@/lib/api'
 import { supabase } from '@/lib/supabase'
 import { addMonths, dateKey, formatDate } from '@/lib/time'
 import { formatMoney, PAYMENT_METHOD } from '@/lib/format'
@@ -15,10 +15,21 @@ export function PaymentFormSheet({ open, onClose, studentId, studentName, sugges
   open: boolean; onClose: () => void; studentId: string; studentName: string; suggested?: number
 }) {
   const { register, handleSubmit, reset, formState: { errors, isDirty } } = useForm<PaymentFormInput, unknown, PaymentFormValues>({ resolver: zodResolver(paymentSchema) })
+  // Aynı ödeme iki kez kaydedilmez: form her açılışta tekil istek kimliği alır (çift dokunma, bağlantı tekrarı)
+  const ref = useRef(newRequestId())
   useEffect(() => {
-    if (open) reset({ amount: suggested && suggested > 0 ? suggested : ('' as unknown as number), paid_at: dateKey(), method: 'nakit', note: '' })
+    if (!open) return
+    ref.current = newRequestId()
+    reset({ amount: suggested && suggested > 0 ? suggested : ('' as unknown as number), paid_at: dateKey(), method: 'nakit', note: '' })
   }, [open, reset, suggested])
-  const save = useDbMutation((v: PaymentFormValues) => insertRow<Payment>('payments', { ...v, student_id: studentId }), {
+  const save = useDbMutation(async (v: PaymentFormValues) => {
+    try {
+      return await insertRow<Payment>('payments', { ...v, student_id: studentId, client_ref: ref.current })
+    } catch (e) {
+      if ((e as { code?: string }).code === '23505' && /client_ref/.test((e as Error).message)) return null // zaten kaydedilmiş
+      throw e
+    }
+  }, {
     success: (_r, v) => `${formatMoney(v.amount)} ödeme kaydedildi`,
     invalidate: PAY_KEYS,
     onSuccess: onClose,

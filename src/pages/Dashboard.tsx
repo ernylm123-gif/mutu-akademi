@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   CalendarCheck2, CalendarClock, CheckCircle2, UserPlus, Plus, ClipboardCheck, Wallet, AlertTriangle, Timer,
-  ChevronRight, Radio, Hourglass,
+  ChevronRight, Radio, Hourglass, Upload,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useActivities, useAllSchedules, useInstallments, useLessons, useSettings, useStudents } from '@/lib/api'
@@ -10,7 +10,7 @@ import { addDays, dateKey, formatDayLong, fromIstanbul, timeHM, WEEKDAYS } from 
 import { formatMoney } from '@/lib/format'
 import type { LessonWithRelations } from '@/types/db'
 import { Card, EmptyState, ErrorBox, PageLoader, SectionTitle, Stat } from '@/components/ui'
-import { LessonRow, LessonSheet } from '@/components/forms/LessonActions'
+import { LessonRow, LessonSheet, type LessonMode } from '@/components/forms/LessonActions'
 import { StudentFormSheet } from '@/components/forms/StudentForm'
 import { LessonFormSheet } from '@/components/forms/LessonForm'
 import { ActivityList } from '@/components/ActivityList'
@@ -70,6 +70,7 @@ export function DashboardPage() {
   }, [schedulesQ.data, studentsQ.data])
 
   const selected = lessons.find((l) => l.id === selectedId) ?? null
+  const [sheetMode, setSheetMode] = useState<LessonMode>('view')
   const hour = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Istanbul', hour: '2-digit', hourCycle: 'h23' }).format(new Date()))
   const greet = hour < 12 ? 'Günaydın' : hour < 18 ? 'İyi günler' : 'İyi akşamlar'
 
@@ -118,11 +119,13 @@ export function DashboardPage() {
       ) : null}
 
       {/* Hızlı işlemler */}
-      <div className="mt-4 grid grid-cols-4 gap-2">
+      <div className="mt-4 grid grid-cols-3 gap-2 sm:grid-cols-6">
         {[
-          { label: 'Öğrenci ekle', icon: UserPlus, show: can.students, onClick: () => setQuickStudent(true) },
-          { label: 'Ders oluştur', icon: Plus, show: can.lessons, onClick: () => setQuickLesson(true) },
-          { label: 'Yoklama al', icon: ClipboardCheck, show: can.lessons || can.instructor, onClick: takeAttendance },
+          { label: 'Yeni öğrenci', icon: UserPlus, show: can.students, onClick: () => setQuickStudent(true) },
+          { label: 'Yeni ders', icon: Plus, show: can.lessons, onClick: () => setQuickLesson(true) },
+          { label: 'Yoklama', icon: ClipboardCheck, show: can.lessons || can.instructor, onClick: takeAttendance },
+          { label: 'Ders ertele', icon: CalendarClock, show: can.lessons, onClick: () => (next ? (setSheetMode('postpone'), setSelectedId(next.id)) : navigate('/dersler')) },
+          { label: 'Program yükle', icon: Upload, show: can.lessons, onClick: () => navigate('/program-yukle') },
           { label: 'Ödeme ekle', icon: Wallet, show: can.payments, onClick: () => navigate('/odemeler?yeni=1') },
         ].filter((q) => q.show).map((q) => (
           <button key={q.label} onClick={q.onClick} className="card flex min-h-[84px] flex-col items-center justify-center gap-1.5 p-2 text-center transition active:scale-[.97]">
@@ -185,7 +188,7 @@ export function DashboardPage() {
         </div>
       </div>
 
-      <LessonSheet lesson={selected} onClose={() => setSelectedId(null)} />
+      <LessonSheet lesson={selected} initialMode={sheetMode} onClose={() => { setSelectedId(null); setSheetMode('view') }} />
       <StudentFormSheet open={quickStudent} onClose={() => setQuickStudent(false)} quick onSaved={(s) => navigate(`/ogrenciler/${s.id}`)} />
       <LessonFormSheet open={quickLesson} onClose={() => setQuickLesson(false)} />
     </div>

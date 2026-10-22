@@ -21,4 +21,6 @@ export interface PublicLesson {
   course_color: string | null
   instructor_label: string | null
   instructor_color: string | null
+  room_name?: string | null
+  lesson_type?: 'bireysel' | 'grup' | 'online' | null
 }

@@ -249,7 +249,7 @@ export function PublicSchedulePage() {
                           </span>
                           <span className="min-w-0 flex-1">
                             <span className={clsx('block truncate font-semibold', l.status === 'iptal' && 'text-slate-400 line-through')}>{l.student_label ?? 'Ders'}</span>
-                            <span className="block truncate text-xs text-slate-500">{l.course_name ?? '—'}{l.instructor_label ? ` · ${l.instructor_label}` : ''}</span>
+                            <span className="block truncate text-xs text-slate-500">{l.course_name ?? '—'}{l.instructor_label ? ` · ${l.instructor_label}` : ''}{l.room_name ? ` · ${l.room_name}` : l.lesson_type === 'online' ? ' · Online' : ''}</span>
                           </span>
                           <span className={clsx('whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold', l.started && l.status === 'planlandi' ? 'bg-accent-50 text-accent-700' : STATUS[l.status].cls)}>
                             {l.started && l.status === 'planlandi' ? 'Devam ediyor' : STATUS[l.status].label}
