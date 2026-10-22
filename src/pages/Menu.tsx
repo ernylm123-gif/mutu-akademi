@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { Users, GraduationCap, Wallet, BarChart3, UserCog, Settings, BookOpen, ShieldCheck, LogOut, ChevronRight, Smartphone, Radio, BellRing, Upload } from 'lucide-react'
+import { Users, GraduationCap, Wallet, BarChart3, UserCog, Settings, BookOpen, ShieldCheck, LogOut, ChevronRight, Smartphone, Radio, BellRing, Upload, DoorOpen } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { ROLE_LABEL } from '@/lib/format'
 import { Avatar, Card } from '@/components/ui'
@@ -15,6 +15,7 @@ export function MenuPage() {
     { to: '/egitmenler', label: 'Eğitmenler', desc: 'Eğitmen listesi ve programları', icon: GraduationCap, show: can.staff, tone: 'bg-brand-50 text-brand-600' },
     { to: '/odemeler', label: 'Ödemeler', desc: 'Tahsilat, taksit ve borçlar', icon: Wallet, show: can.payments, tone: 'bg-emerald-50 text-emerald-600' },
     { to: '/raporlar', label: 'Raporlar', desc: 'İstatistikler, PDF ve CSV', icon: BarChart3, show: can.staff, tone: 'bg-sun-100 text-sun-700' },
+    { to: '/siniflar', label: 'Sınıflar', desc: 'Derslik, kapasite ve kullanım', icon: DoorOpen, show: can.staff, tone: 'bg-brand-50 text-brand-600' },
     { to: '/kurslar', label: 'Kurslar', desc: 'Kurs türleri ve varsayılanlar', icon: BookOpen, show: can.staff, tone: 'bg-accent-50 text-accent-600' },
     { to: '/kullanicilar', label: 'Cihazlar ve Kullanıcılar', desc: 'Telefon ekle (özel bağlantı), erişim', icon: UserCog, show: can.admin, tone: 'bg-slate-100 text-slate-700' },
     { to: '/islem-gecmisi', label: 'İşlem Geçmişi', desc: 'Önemli değişikliklerin kaydı', icon: ShieldCheck, show: can.admin, tone: 'bg-slate-100 text-slate-700' },

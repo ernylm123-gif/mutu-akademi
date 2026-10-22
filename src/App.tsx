@@ -30,6 +30,7 @@ const ActivitiesPage = lazy(() => import('@/pages/Activities').then((m) => ({ de
 const ScheduleImportPage = lazy(() => import('@/pages/ScheduleImport').then((m) => ({ default: m.ScheduleImportPage })))
 const NotificationSettingsPage = lazy(() => import('@/pages/Misc').then((m) => ({ default: m.NotificationSettingsPage })))
 const LessonsPage = lazy(() => import('@/pages/Lessons').then((m) => ({ default: m.LessonsPage })))
+const RoomsPage = lazy(() => import('@/pages/Rooms').then((m) => ({ default: m.RoomsPage })))
 const InstallPage = lazy(() => import('@/pages/Misc').then((m) => ({ default: m.InstallPage })))
 
 function Guard({ allow, children }: { allow: boolean; children: ReactNode }) {
@@ -81,6 +82,7 @@ function Protected() {
           <Route path="odemeler" element={<Guard allow={can.payments}><PaymentsPage /></Guard>} />
           <Route path="raporlar" element={<Guard allow={can.staff}><ReportsPage /></Guard>} />
           <Route path="kurslar" element={<Guard allow={can.staff}><CoursesPage /></Guard>} />
+          <Route path="siniflar" element={<Guard allow={can.staff}><RoomsPage /></Guard>} />
           <Route path="kullanicilar" element={<Guard allow={can.admin}><UsersPage /></Guard>} />
           <Route path="islem-gecmisi" element={<Guard allow={can.admin}><AuditPage /></Guard>} />
           <Route path="ayarlar" element={<SettingsPage />} />

@@ -12,6 +12,8 @@ import type { Instructor } from '@/types/db'
 import { Avatar, Badge, Button, Card, EmptyState, Field, Input, PageLoader, SectionTitle, Select, Sheet, Textarea, Toggle } from '@/components/ui'
 import { PageHeader } from '@/components/layout/AppShell'
 import { LessonRow, LessonSheet } from '@/components/forms/LessonActions'
+import { collapseGroups } from '@/lib/lessons'
+import { AvailabilityEditor } from '@/pages/Rooms'
 
 const COLORS = ['#29A8DF', '#D6268B', '#C9B800', '#111827', '#10B981', '#8B5CF6', '#F97316', '#0EA5E9']
 
@@ -104,7 +106,7 @@ export function InstructorsPage() {
 
 export function InstructorDetailPage() {
   const { id } = useParams()
-  const { can } = useAuth()
+  const { can, profile } = useAuth()
   const navigate = useNavigate()
   const { data: instructors, isLoading } = useInstructors()
   const { data: students } = useStudents()
@@ -118,8 +120,12 @@ export function InstructorDetailPage() {
   const assigned = useMemo(() => students?.filter((s) => s.instructor_id === id) ?? [], [students, id])
   if (isLoading) return <PageLoader />
   if (!ins) return <EmptyState title="Eğitmen bulunamadı" />
-  const m = monthQ.data ?? []
-  const selected = lessonsQ.data?.find((l) => l.id === selectedId) ?? null
+  // Grup dersleri tek ders sayılır
+  const ms = collapseGroups(monthQ.data ?? [])
+  const weekSessions = collapseGroups(lessonsQ.data ?? [])
+  const todayCount = weekSessions.filter((l) => dateKey(l.starts_at) === dateKey() && l.status !== 'ertelendi').length
+  const monthChanges = ms.filter((l) => l.status === 'iptal' || l.status === 'ertelendi')
+  const selected = [...(lessonsQ.data ?? []), ...(monthQ.data ?? [])].find((l) => l.id === selectedId) ?? null
   return (
     <div>
       <PageHeader back title={ins.full_name} subtitle={ins.specialty ?? undefined}
@@ -127,15 +133,27 @@ export function InstructorDetailPage() {
           {ins.phone && <a href={telHref(ins.phone)}><Button variant="secondary" icon={<Phone className="size-4" />}>Ara</Button></a>}
           {can.admin && <Button variant="secondary" icon={<Pencil className="size-4" />} onClick={() => setEditing(true)}>Düzenle</Button>}
         </>} />
-      <div className="grid grid-cols-3 gap-2">
-        <Card className="p-4 text-center"><p className="text-2xl font-bold">{m.filter((l) => l.status === 'tamamlandi').length}</p><p className="text-xs text-slate-500">Bu ay verilen</p></Card>
-        <Card className="p-4 text-center"><p className="text-2xl font-bold">{m.filter((l) => l.status === 'planlandi').length}</p><p className="text-xs text-slate-500">Bu ay planlı</p></Card>
+      <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+        <Card className="p-4 text-center"><p className="text-2xl font-bold">{todayCount}</p><p className="text-xs text-slate-500">Bugün</p></Card>
+        <Card className="p-4 text-center"><p className="text-2xl font-bold">{weekSessions.length}</p><p className="text-xs text-slate-500">Bu hafta</p></Card>
+        <Card className="p-4 text-center"><p className="text-2xl font-bold">{ms.filter((l) => l.status === 'tamamlandi').length}</p><p className="text-xs text-slate-500">Bu ay tamamlanan</p></Card>
+        <Card className="p-4 text-center"><p className="text-2xl font-bold">{ms.filter((l) => l.status === 'iptal').length}</p><p className="text-xs text-slate-500">Bu ay iptal</p></Card>
+        <Card className="p-4 text-center"><p className="text-2xl font-bold">{ms.filter((l) => l.status === 'ertelendi').length}</p><p className="text-xs text-slate-500">Bu ay ertelenen</p></Card>
         <Card className="p-4 text-center"><p className="text-2xl font-bold">{assigned.filter((s) => s.is_active).length}</p><p className="text-xs text-slate-500">Öğrenci</p></Card>
       </div>
+      {ins.phone && can.staff && <p className="mt-3 text-sm text-slate-600">Telefon: {ins.phone}</p>}
       {ins.notes && <Card className="mt-3 p-4 text-sm">{ins.notes}</Card>}
+      <SectionTitle>Haftalık çalışma saatleri</SectionTitle>
+      <AvailabilityEditor instructorId={ins.id} editable={can.admin || ins.profile_id === profile?.id} />
       <SectionTitle>Bu haftaki program</SectionTitle>
-      {(lessonsQ.data ?? []).length === 0 ? <Card className="p-4 text-sm text-slate-500">Bu hafta ders yok.</Card> : (
-        <div className="space-y-2">{lessonsQ.data!.map((l) => <LessonRow key={l.id} lesson={l} showDate onClick={() => setSelectedId(l.id)} />)}</div>
+      {weekSessions.length === 0 ? <Card className="p-4 text-sm text-slate-500">Bu hafta ders yok.</Card> : (
+        <div className="space-y-2">{weekSessions.map((l) => <LessonRow key={l.id} lesson={l} showDate onClick={() => setSelectedId(l.id)} />)}</div>
+      )}
+      {monthChanges.length > 0 && (
+        <>
+          <SectionTitle>Bu ayın iptal ve erteleme geçmişi</SectionTitle>
+          <div className="space-y-2">{monthChanges.map((l) => <LessonRow key={l.id} lesson={l} showDate showAttendance={false} onClick={() => setSelectedId(l.id)} />)}</div>
+        </>
       )}
       <SectionTitle>Atanmış öğrenciler</SectionTitle>
       <Card className="divide-y divide-slate-100 dark:divide-white/10">
