@@ -2,13 +2,13 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import clsx from 'clsx'
 import { AlertTriangle, CheckCircle2, Info } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
-import { useStudents, useInstructors, useCourses, useRooms, useDbMutation, planRpc, newRequestId, LESSON_INVALIDATE, type LessonPlanInput } from '@/lib/api'
+import { useStudents, useInstructors, useCourses, useRooms, useDbMutation, insertRow, planRpc, newRequestId, LESSON_INVALIDATE, type LessonPlanInput } from '@/lib/api'
 import { addMonths, dateKey, formatDayShort, isoWeekday, timeHM, WEEKDAYS, WEEKDAYS_SHORT } from '@/lib/time'
 import { errorMessage } from '@/lib/errors'
 import { LESSON_TYPE } from '@/lib/format'
 import { frequentTimes } from '@/lib/recent'
-import type { LessonPreview, LessonType } from '@/types/db'
-import { Button, Field, Input, Segmented, Select, Sheet, Textarea } from '@/components/ui'
+import type { Course, Instructor, LessonPreview, LessonType, Student } from '@/types/db'
+import { Button, Field, Input, Segmented, Select, Sheet, Textarea, Toggle } from '@/components/ui'
 import { SearchSelect } from '@/components/ui/SearchSelect'
 
 type Freq = 'yok' | 'gunluk' | 'haftalik' | 'gunler' | 'iki_haftalik' | 'ozel'
@@ -42,6 +42,28 @@ interface State {
   notes: string
   instructorNote: string
   adminNote: string
+  group: boolean
+  advanced: boolean
+}
+
+/** Form içinden hızlı kayıt (öğrenci / kurs / eğitmen) – boş listede ders eklemeyi engellememek için */
+function QuickAdd<T extends { id: string }>({ placeholder, button, create, onCreated, invalidate, disabled }: {
+  placeholder: string; button: string; create: (name: string) => Promise<T>; onCreated: (row: T) => void; invalidate: string[]; disabled?: boolean
+}) {
+  const [name, setName] = useState('')
+  const add = useDbMutation((n: string) => create(n), {
+    success: (_r, n) => `"${n}" eklendi ve seçildi`, invalidate,
+    onSuccess: (row) => { setName(''); onCreated(row) },
+  })
+  if (disabled) return <p className="text-sm text-slate-500">Bu kaydı yalnızca yönetici ekleyebilir.</p>
+  const ok = name.trim().length >= 2
+  return (
+    <div className="flex gap-2">
+      <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={placeholder} maxLength={120} enterKeyHint="done"
+        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); if (ok) add.mutate(name.trim()) } }} />
+      <Button type="button" disabled={!ok} loading={add.isPending} onClick={() => add.mutate(name.trim())} className="shrink-0">{button}</Button>
+    </div>
+  )
 }
 
 export function LessonFormSheet({ open, onClose, defaults }: {
@@ -73,7 +95,7 @@ export function LessonFormSheet({ open, onClose, defaults }: {
       course: st?.course_id ?? '',
       room: '', title: '', type: 'bireysel', date, start, end: toHM(toMin(start) + dur),
       freq: 'yok', weekdays: [isoWeekday(date)], interval: 7, until: addMonths(date, 3),
-      notes: '', instructorNote: '', adminNote: '',
+      notes: '', instructorNote: '', adminNote: '', group: false, advanced: false,
     })
     setDirty(false)
     setPreview(null)
@@ -177,28 +199,49 @@ export function LessonFormSheet({ open, onClose, defaults }: {
       }
     >
       <form className="grid gap-4" onSubmit={(e) => { e.preventDefault(); if (!validation && preview && !preview.conflict_count) save.mutate(false) }} noValidate>
-        <Field label={`Öğrenci${v.students.length > 1 ? `ler (${v.students.length}) – grup dersi` : ''} *`}>
-          <SearchSelect multiple options={studentOpts} value={v.students} onChange={(x) => set({ students: x })} placeholder="Öğrenci ara ve seç (birden fazla seçilebilir)" ariaLabel="Öğrenciler" />
+        <Field label={v.group ? `Öğrenciler (${v.students.length}) – grup dersi *` : 'Öğrenci *'}>
+          {studentOpts.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-brand-300 bg-brand-50/50 p-3">
+              <p className="mb-2 text-sm font-semibold text-brand-800">Henüz öğrenci yok – önce öğrenci ekleyin</p>
+              <QuickAdd placeholder="Öğrencinin adı soyadı" button="Öğrenci ekle" disabled={!can.students}
+                create={(name) => insertRow<Student>('students', { full_name: name, course_id: v.course || null, instructor_id: v.instructor || null })}
+                onCreated={(s) => set({ students: [s.id] })} invalidate={['students']} />
+            </div>
+          ) : (
+            <SearchSelect multiple={v.group} options={studentOpts} value={v.students} onChange={(x) => set({ students: x })}
+              placeholder={v.group ? 'Öğrencileri ara ve seç' : 'Öğrenci ara ve seç'} ariaLabel="Öğrenci" />
+          )}
         </Field>
+        {studentOpts.length > 0 && can.students && (
+          <details className="-mt-2 text-sm">
+            <summary className="flex min-h-11 cursor-pointer items-center font-semibold text-brand-600">+ Listede yok, yeni öğrenci ekle</summary>
+            <QuickAdd placeholder="Öğrencinin adı soyadı" button="Ekle ve seç"
+              create={(name) => insertRow<Student>('students', { full_name: name, course_id: v.course || null, instructor_id: v.instructor || null })}
+              onCreated={(s) => set({ students: v.group ? [...v.students, s.id] : [s.id] })} invalidate={['students']} />
+          </details>
+        )}
         {noCredit.length > 0 && (
           <p className="rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-800">{noCredit.map((s) => s.full_name).join(', ')}: kalan ders hakkı yok. Ders yine de planlanabilir.</p>
         )}
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Eğitmen">
-            <SearchSelect options={(instructors ?? []).filter((i) => i.is_active || i.id === v.instructor).map((i) => ({ value: i.id, label: i.full_name, hint: i.specialty ?? undefined }))}
-              value={v.instructor ? [v.instructor] : []} onChange={(x) => set({ instructor: x[0] ?? '' })} placeholder="Eğitmen ara" emptyLabel="Eğitmen atanmadı" ariaLabel="Eğitmen" />
-          </Field>
           <Field label="Kurs">
-            <SearchSelect options={(courses ?? []).filter((c) => c.is_active || c.id === v.course).map((c) => ({ value: c.id, label: c.name }))}
-              value={v.course ? [v.course] : []} onChange={(x) => set({ course: x[0] ?? '' })} placeholder="Kurs ara" emptyLabel="Öğrencinin kursu" ariaLabel="Kurs" />
+            {(courses ?? []).length === 0 ? (
+              <QuickAdd placeholder="Kurs adı (ör. Python Eğitimi)" button="Kurs ekle" disabled={!can.admin}
+                create={(name) => insertRow<Course>('courses', { name })} onCreated={(c) => set({ course: c.id })} invalidate={['courses']} />
+            ) : (
+              <SearchSelect options={(courses ?? []).filter((c) => c.is_active || c.id === v.course).map((c) => ({ value: c.id, label: c.name }))}
+                value={v.course ? [v.course] : []} onChange={(x) => set({ course: x[0] ?? '' })} placeholder="Kurs ara" emptyLabel="Öğrencinin kursu" ariaLabel="Kurs" />
+            )}
           </Field>
-        </div>
-        <Field label="Ders konusu / başlığı">
-          <Input value={v.title} maxLength={120} onChange={(e) => set({ title: e.target.value })} placeholder="Ör. Python – Döngüler" />
-        </Field>
-        <div>
-          <p className="mb-1.5 text-sm font-semibold">Ders türü</p>
-          <Segmented value={effectiveType} onChange={(t) => set({ type: t })} options={(['bireysel', 'grup', 'online'] as LessonType[]).map((t) => ({ value: t, label: LESSON_TYPE[t] }))} />
+          <Field label="Eğitmen">
+            {(instructors ?? []).length === 0 ? (
+              <QuickAdd placeholder="Eğitmen adı soyadı" button="Eğitmen ekle" disabled={!can.admin}
+                create={(name) => insertRow<Instructor>('instructors', { full_name: name })} onCreated={(i) => set({ instructor: i.id })} invalidate={['instructors']} />
+            ) : (
+              <SearchSelect options={(instructors ?? []).filter((i) => i.is_active || i.id === v.instructor).map((i) => ({ value: i.id, label: i.full_name, hint: i.specialty ?? undefined }))}
+                value={v.instructor ? [v.instructor] : []} onChange={(x) => set({ instructor: x[0] ?? '' })} placeholder="Eğitmen ara" emptyLabel="Eğitmen atanmadı" ariaLabel="Eğitmen" />
+            )}
+          </Field>
         </div>
 
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -228,6 +271,21 @@ export function LessonFormSheet({ open, onClose, defaults }: {
           </div>
         )}
 
+        <details className="rounded-2xl border border-slate-200 px-3 [&[open]]:pb-3" open={v.advanced} onToggle={(e) => setV((s) => (s ? { ...s, advanced: (e.target as HTMLDetailsElement).open } : s))}>
+          <summary className="flex min-h-12 cursor-pointer items-center justify-between text-sm font-semibold">
+            Gelişmiş ayarlar
+            <span className="text-xs font-normal text-slate-500">Sınıf, grup dersi, tekrarlama, tür, konu, notlar</span>
+          </summary>
+          <div className="grid gap-4 pt-2">
+        <Toggle checked={v.group} onChange={(g) => set({ group: g, students: g ? v.students : v.students.slice(0, 1) })}
+          label="Grup dersi" description="Bir derse birden fazla öğrenci; her öğrenciye ayrı yoklama ve ders hakkı." />
+        <div>
+          <p className="mb-1.5 text-sm font-semibold">Ders türü</p>
+          <Segmented value={effectiveType} onChange={(t) => set({ type: t, group: t === 'grup' ? true : v.group })} options={(['bireysel', 'grup', 'online'] as LessonType[]).map((t) => ({ value: t, label: LESSON_TYPE[t] }))} />
+        </div>
+        <Field label="Ders konusu">
+          <Input value={v.title} maxLength={120} onChange={(e) => set({ title: e.target.value })} placeholder="Ör. Python – Döngüler" />
+        </Field>
         {effectiveType !== 'online' && (
           <Field label="Sınıf / oda" hint={room?.capacity ? `Kapasite: ${room.capacity} kişi` : undefined}>
             <Select value={v.room} onChange={(e) => set({ room: e.target.value })}>
@@ -271,6 +329,8 @@ export function LessonFormSheet({ open, onClose, defaults }: {
           <Field label="Eğitmen notu"><Textarea rows={2} value={v.instructorNote} onChange={(e) => set({ instructorNote: e.target.value })} /></Field>
           {can.lessons && <Field label="Yönetici açıklaması" hint="Yalnızca yetkili cihazlarda görünür."><Textarea rows={2} value={v.adminNote} onChange={(e) => set({ adminNote: e.target.value })} /></Field>}
         </div>
+          </div>
+        </details>
 
         <div aria-live="polite" className="rounded-2xl border border-slate-200 p-3 text-sm">
           {validation ? <p className="flex items-center gap-2 text-slate-500"><Info className="size-4" />{validation}</p>

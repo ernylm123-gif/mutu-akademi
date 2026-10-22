@@ -1,4 +1,6 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
+import { Plus } from 'lucide-react'
+import { LessonFormSheet } from '@/components/forms/LessonForm'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import clsx from 'clsx'
 import {
@@ -42,6 +44,7 @@ export function AppShell() {
   }, [navigate])
   const unread = useUnreadCount()
   const loc = useLocation()
+  const [newLesson, setNewLesson] = useState(false)
 
   const main = [
     { to: '/', label: 'Ana Sayfa', icon: Home, end: true },
@@ -118,6 +121,16 @@ export function AppShell() {
         <div className="mb-4 hidden justify-end lg:flex"><SyncDot /></div>
         <Outlet />
       </main>
+
+      {/* Her ekrandan tek dokunuşla yeni ders (yalnızca ders yetkisi olan cihazlar) */}
+      {can.lessons && !/^\/(program-yukle|ders\/)/.test(loc.pathname) && (
+        <button onClick={() => setNewLesson(true)} aria-label="Yeni ders"
+          className="no-print fixed right-4 z-30 flex h-14 items-center gap-2 rounded-full bg-brand-600 px-5 font-semibold text-white shadow-lg shadow-brand-600/30 active:scale-95 lg:bottom-6 lg:right-8"
+          style={{ bottom: 'calc(5.25rem + env(safe-area-inset-bottom))' }}>
+          <Plus className="size-5" /> Ders
+        </button>
+      )}
+      <LessonFormSheet open={newLesson} onClose={() => setNewLesson(false)} />
 
       {/* Mobil alt menü */}
       <nav className="no-print safe-bottom fixed inset-x-0 bottom-0 z-30 border-t border-slate-200/70 bg-white/92 backdrop-blur-xl lg:hidden dark:border-white/10 dark:bg-[#0e131a]/92">

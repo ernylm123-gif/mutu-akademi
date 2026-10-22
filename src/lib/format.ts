@@ -3,14 +3,19 @@ import type { AttendanceStatus, InstallmentStatus, LessonStatus, LessonType, Pay
 const money = new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY', maximumFractionDigits: 2 })
 export const formatMoney = (n: number | string | null | undefined) => money.format(Number(n ?? 0))
 
-export type Tone = 'brand' | 'green' | 'red' | 'amber' | 'slate' | 'accent'
+export type Tone = 'brand' | 'green' | 'red' | 'amber' | 'slate' | 'accent' | 'cyan'
+
+/** Takvim kartı renkleri (durum bazlı) */
+export const TONE_COLOR: Record<Tone, string> = {
+  brand: '#2563eb', cyan: '#0891b2', green: '#16a34a', amber: '#f59e0b', red: '#dc2626', slate: '#94a3b8', accent: '#d6268b',
+}
 
 export const ROLE_LABEL: Record<AppRole, string> = { admin: 'Yönetici', egitmen: 'Eğitmen', personel: 'Personel' }
 
 export const LESSON_STATUS: Record<LessonStatus, { label: string; tone: Tone }> = {
   planlandi: { label: 'Planlandı', tone: 'brand' },
   tamamlandi: { label: 'Tamamlandı', tone: 'green' },
-  ertelendi: { label: 'Ertelendi', tone: 'amber' },
+  ertelendi: { label: 'Ertelendi', tone: 'amber' as Tone },
   iptal: { label: 'İptal edildi', tone: 'red' },
 }
 
@@ -31,10 +36,14 @@ export const POSTPONE_REASON: Record<PostponeReason, string> = {
 }
 
 /** Planlama durumu + zamana göre görünen durum (Yaklaşıyor / Devam ediyor hesaplanır) */
-export function displayStatus(l: { status: LessonStatus; starts_at: string; ends_at: string; started_at?: string | null }, now = Date.now()) {
+export function displayStatus(l: { status: LessonStatus; starts_at: string; ends_at: string; started_at?: string | null; attendance?: { status: AttendanceStatus } | null }, now = Date.now()) {
+  // Öğrenci bazlı yoklama sonucu, gerçekleşen derste ön plana çıkar
+  if (l.status === 'tamamlandi' && l.attendance?.status === 'katilmadi') return { label: 'Öğrenci gelmedi', tone: 'slate' as Tone }
+  if (l.status === 'tamamlandi' && l.attendance?.status === 'izinli') return { label: 'İzinli', tone: 'amber' as Tone }
   if (l.status !== 'planlandi') return LESSON_STATUS[l.status]
   const s = new Date(l.starts_at).getTime(), e = new Date(l.ends_at).getTime()
-  if (l.started_at || (now >= s && now < e)) return { label: 'Devam ediyor', tone: 'accent' as Tone }
+  if (l.started_at || (now >= s && now < e)) return { label: 'Devam ediyor', tone: 'cyan' as Tone }
+  if (now >= e) return { label: 'Süresi doldu – tamamlanmadı', tone: 'amber' as Tone }
   if (s > now && s - now <= 2 * 3600_000) return { label: 'Yaklaşıyor', tone: 'amber' as Tone }
   return LESSON_STATUS.planlandi
 }

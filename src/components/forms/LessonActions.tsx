@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import clsx from 'clsx'
-import { Check, X, Clock3, CalendarClock, Ban, RotateCcw, Trash2, Phone, User, Undo2, CheckCheck, Pencil, Users, DoorOpen, Timer, LogOut } from 'lucide-react'
+import { Check, X, Clock3, CalendarClock, Ban, RotateCcw, Trash2, Phone, User, Undo2, CheckCheck, Pencil, Users, DoorOpen, Timer, LogOut, Play, ClipboardCheck } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useDbMutation, lessonRpc, planRpc, newRequestId, useInstructors, useRooms, useSettings, useLessonGroup, LESSON_INVALIDATE, type Scope } from '@/lib/api'
 import { dateKey, formatDayLong, formatDayShort, fromIstanbul, timeHM } from '@/lib/time'
-import { ATTENDANCE_ORDER, ATTENDANCE_STATUS, displayStatus, LESSON_TYPE, POSTPONE_REASON, telHref } from '@/lib/format'
+import { ATTENDANCE_ORDER, ATTENDANCE_STATUS, displayStatus, LESSON_TYPE, POSTPONE_REASON, TONE_COLOR, telHref } from '@/lib/format'
 import { consumesCredit } from '@/lib/rules'
 import { memberLabel, type LessonItem } from '@/lib/lessons'
 import type { AttendanceStatus, LessonWithRelations, PostponeReason, ScopeItem } from '@/types/db'
@@ -137,6 +137,7 @@ export function LessonSheet({ lesson, onClose, initialMode = 'view' }: { lesson:
   )
   const cancel = useDbMutation(() => lessonRpc.cancel(lesson!, text.trim() || null), { success: 'Ders iptal edildi', ...done })
   const restore = useDbMutation(() => planRpc.restore(lesson!), { success: 'İptal geri alındı; ders yeniden planlandı', ...done })
+  const begin = useDbMutation(() => lessonRpc.start(lesson!), { success: 'Ders başladı (devam ediyor)', invalidate: LESSON_INVALIDATE })
   const clear = useDbMutation(() => lessonRpc.clear(lesson!), { success: 'Yoklama geri alındı', invalidate: LESSON_INVALIDATE })
   const edit = useDbMutation(
     () => planRpc.update(lesson!, {
@@ -232,18 +233,25 @@ export function LessonSheet({ lesson, onClose, initialMode = 'view' }: { lesson:
 
           {(canManage || isMine) && (
             <div className="grid grid-cols-2 gap-2 border-t border-slate-100 pt-4">
+              {lesson.status === 'planlandi' && !lesson.started_at && (
+                <Button className="bg-cyan-600 hover:bg-cyan-700" icon={<Play className="size-4" />} disabled={notStarted} loading={begin.isPending}
+                  onClick={() => begin.mutate(undefined)}>Dersi başlat</Button>
+              )}
               {(lesson.status === 'planlandi' || lesson.status === 'tamamlandi') && (
-                <Button icon={<CheckCheck className="size-4" />} disabled={notStarted} onClick={() => setMode('complete')}
+                <Button className="bg-emerald-600 hover:bg-emerald-700" icon={<CheckCheck className="size-4" />} disabled={notStarted} onClick={() => setMode('complete')}
                   title={notStarted ? 'Ders başlamadan tamamlanamaz' : undefined}>
-                  {lesson.status === 'tamamlandi' ? 'Yoklamayı düzenle' : 'Tamamla'}
+                  {lesson.status === 'tamamlandi' ? 'Yoklamayı düzenle' : 'Tamamlandı'}
                 </Button>
+              )}
+              {lesson.status === 'planlandi' && (
+                <Button variant="secondary" icon={<ClipboardCheck className="size-4" />} disabled={notStarted} onClick={() => setMode('complete')}>Yoklama al</Button>
               )}
               {canManage && lesson.status === 'planlandi' && (
                 <>
-                  <Button variant="secondary" icon={<Pencil className="size-4" />} onClick={() => setMode('edit')}>Saati değiştir</Button>
                   <Button variant="secondary" icon={<CalendarClock className="size-4" />} onClick={() => setMode('postpone')}>Ertele</Button>
+                  <Button variant="secondary" icon={<Pencil className="size-4" />} onClick={() => setMode('edit')}>Düzenle</Button>
                   <Button variant="secondary" icon={<Ban className="size-4" />} onClick={() => setMode('cancel')} className="text-red-600">İptal et</Button>
-                  <Button variant="ghost" icon={<Trash2 className="size-4" />} onClick={() => setMode('delete')} className="text-red-600">Programdan kaldır</Button>
+                  <Button variant="ghost" icon={<Trash2 className="size-4" />} onClick={() => setMode('delete')} className="text-red-600">Sil</Button>
                 </>
               )}
               {canManage && lesson.status === 'iptal' && (
@@ -357,7 +365,7 @@ export function LessonRow({ lesson, onClick, showDate, showAttendance = true }: 
   const isGroup = members.length > 1
   const st = displayStatus(lesson)
   const att = !isGroup && lesson.attendance ? ATTENDANCE_STATUS[lesson.attendance.status] : null
-  const color = lesson.instructor?.color ?? '#2563eb'
+  const color = TONE_COLOR[st.tone]
   const faded = lesson.status === 'iptal' || lesson.status === 'ertelendi'
   return (
     <div className="card overflow-hidden">

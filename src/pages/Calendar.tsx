@@ -10,7 +10,7 @@ import {
   addDays, addMonths, dateKey, formatDayLong, formatDayShort, fromIstanbul, istanbulParts, minutesBetween, monthGrid, MONTHS,
   startOfMonth, startOfWeek, timeHM, WEEKDAYS_SHORT,
 } from '@/lib/time'
-import { ATTENDANCE_STATUS } from '@/lib/format'
+import { ATTENDANCE_STATUS, displayStatus, TONE_COLOR } from '@/lib/format'
 import { collapseGroups, memberLabel, type LessonItem } from '@/lib/lessons'
 import { exportCsv, exportPdf, exportWeeklyPrint, exportXlsx } from '@/lib/scheduleExport'
 import { errorMessage } from '@/lib/errors'
@@ -335,7 +335,7 @@ function WeekLesson({ lesson, onOpen, draggable }: { lesson: LessonWithRelations
   const top = ((p.hh - START_HOUR) * 60 + p.mm) * (HOUR_PX / 60)
   const height = Math.max(22, minutesBetween(lesson.starts_at, lesson.ends_at) * (HOUR_PX / 60) - 2)
   if (p.hh < START_HOUR || p.hh >= END_HOUR) return null
-  const color = lesson.instructor?.color ?? '#29a8df'
+  const color = TONE_COLOR[displayStatus(lesson).tone]
   const faded = lesson.status === 'iptal' || lesson.status === 'ertelendi'
   return (
     <button
@@ -380,7 +380,7 @@ function MonthGrid({ cursor, lessons, onPick }: { cursor: string; lessons: Lesso
                 <>
                   <span className="hidden w-full space-y-0.5 sm:block">
                     {active.slice(0, 3).map((l) => (
-                      <span key={l.id} className="block truncate rounded px-1 text-[10px] font-medium text-white" style={{ background: l.instructor?.color ?? '#29a8df' }}>
+                      <span key={l.id} className="block truncate rounded px-1 text-[10px] font-medium text-white" style={{ background: TONE_COLOR[displayStatus(l).tone] }}>
                         {timeHM(l.starts_at)} {memberLabel(l)}
                       </span>
                     ))}
