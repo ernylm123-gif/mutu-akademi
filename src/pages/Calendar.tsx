@@ -7,13 +7,17 @@ import { DndContext, PointerSensor, TouchSensor, useDraggable, useDroppable, use
 import { useAuth } from '@/hooks/useAuth'
 import { useInstructors, useLessons, useDbMutation, useStudents, useCourses, useRooms, planRpc, LESSON_INVALIDATE } from '@/lib/api'
 import {
-  addDays, addMonths, dateKey, formatDayLong, fromIstanbul, istanbulParts, minutesBetween, monthGrid, MONTHS,
+  addDays, addMonths, dateKey, formatDayLong, formatDayShort, fromIstanbul, istanbulParts, minutesBetween, monthGrid, MONTHS,
   startOfMonth, startOfWeek, timeHM, WEEKDAYS_SHORT,
 } from '@/lib/time'
 import { ATTENDANCE_STATUS } from '@/lib/format'
 import { collapseGroups, memberLabel, type LessonItem } from '@/lib/lessons'
+import { exportCsv, exportPdf, exportWeeklyPrint, exportXlsx } from '@/lib/scheduleExport'
+import { errorMessage } from '@/lib/errors'
+import { useToast } from '@/components/ui/Toast'
+import { Download, FileSpreadsheet, FileText, Printer } from 'lucide-react'
 import type { LessonStatus, LessonWithRelations } from '@/types/db'
-import { Button, Card, EmptyState, ErrorBox, Input, PageLoader, Segmented, Select } from '@/components/ui'
+import { Button, Card, EmptyState, ErrorBox, Input, PageLoader, Segmented, Select, Sheet } from '@/components/ui'
 import { PageHeader } from '@/components/layout/AppShell'
 import { LessonRow, LessonSheet } from '@/components/forms/LessonActions'
 import { LessonFormSheet } from '@/components/forms/LessonForm'
@@ -41,6 +45,7 @@ export function CalendarPage() {
   const setFilter = (p: Partial<Filters>) => setF((x) => ({ ...x, ...p }))
   const instr = f.instr
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [exporting, setExporting] = useState(false)
   const [creating, setCreating] = useState<{ date: string; time?: string } | null>(null)
   const { data: instructors } = useInstructors()
   const { data: students } = useStudents()
@@ -82,10 +87,13 @@ export function CalendarPage() {
 
   return (
     <div>
-      <PageHeader title="Takvim" actions={can.lessons && <>
-        <Button variant="secondary" icon={<Upload className="size-4" />} onClick={() => navigate('/program-yukle')}>Program yükle</Button>
-        <Button icon={<Plus className="size-4" />} onClick={() => setCreating({ date: cursor })}>Ders oluştur</Button>
+      <PageHeader title="Takvim" actions={can.staff && <>
+        <Button variant="secondary" icon={<Download className="size-4" />} onClick={() => setExporting(true)}>Dışa aktar</Button>
+        {can.lessons && <Button variant="secondary" icon={<Upload className="size-4" />} onClick={() => navigate('/program-yukle')}>Program yükle</Button>}
+        {can.lessons && <Button icon={<Plus className="size-4" />} onClick={() => setCreating({ date: cursor })}>Ders oluştur</Button>}
       </>} />
+      <ExportSheet open={exporting} onClose={() => setExporting(false)} lessons={lessons} from={range[0]} to={range[1]} weekStart={startOfWeek(cursor)}
+        note={[instructors?.find((i) => i.id === instr)?.full_name, students?.find((s) => s.id === f.student)?.full_name, rooms?.find((r) => r.id === f.room)?.name].filter(Boolean).join(', ')} />
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <div className="max-w-full overflow-x-auto">
           <Segmented value={view} onChange={changeView} options={[
@@ -172,6 +180,43 @@ export function CalendarPage() {
       <LessonSheet lesson={selected} onClose={() => setSelectedId(null)} />
       <LessonFormSheet open={!!creating} onClose={() => setCreating(null)} defaults={creating ? { date: creating.date, time: creating.time, instructor_id: instr || undefined } : undefined} />
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Dışa aktarma (görünen aralık ve filtreler)
+// ---------------------------------------------------------------------------
+function ExportSheet({ open, onClose, lessons, from, to, weekStart, note }: {
+  open: boolean; onClose: () => void; lessons: LessonItem[]; from: string; to: string; weekStart: string; note: string
+}) {
+  const toast = useToast()
+  const [busy, setBusy] = useState<string | null>(null)
+  const run = async (kind: string, fn: () => Promise<void> | void) => {
+    setBusy(kind)
+    try { await fn(); toast.success('Dosya hazırlandı'); onClose() } catch (e) { toast.error(errorMessage(e)) } finally { setBusy(null) }
+  }
+  const items = [...lessons].sort((a, b) => a.starts_at.localeCompare(b.starts_at))
+  const opts = [
+    { k: 'pdf', label: 'PDF', desc: 'Logo, tarih aralığı, kurs, eğitmen, öğrenci, saat ve durum', icon: FileText, fn: () => exportPdf(items, from, to, note) },
+    { k: 'xlsx', label: 'Excel (.xlsx)', desc: 'Düzenlenebilir tablo', icon: FileSpreadsheet, fn: () => exportXlsx(items, from) },
+    { k: 'csv', label: 'CSV', desc: 'Diğer programlar için', icon: FileSpreadsheet, fn: () => exportCsv(items, from) },
+    { k: 'print', label: 'Yazdırılabilir haftalık program', desc: 'A4 yatay, gün sütunlu', icon: Printer, fn: () => exportWeeklyPrint(collapseGroups(items.flatMap((i) => i.members)), weekStart, note) },
+  ]
+  return (
+    <Sheet open={open} onClose={onClose} title="Programı dışa aktar">
+      <p className="mb-3 text-sm text-slate-500">{formatDayShort(from)} – {formatDayShort(addDays(to, -1))} · {items.length} ders{note ? ` · ${note}` : ''}</p>
+      <div className="grid gap-2">
+        {opts.map((o) => (
+          <button key={o.k} disabled={!!busy || (o.k !== 'print' && items.length === 0)} onClick={() => void run(o.k, o.fn)}
+            className="card flex min-h-16 items-center gap-3 p-4 text-left disabled:opacity-50">
+            <span className="grid size-11 place-items-center rounded-2xl bg-brand-50 text-brand-600"><o.icon className="size-5" /></span>
+            <span className="flex-1"><span className="block font-semibold">{o.label}</span><span className="block text-xs text-slate-500">{o.desc}</span></span>
+            {busy === o.k && <span className="text-xs text-slate-500">Hazırlanıyor…</span>}
+          </button>
+        ))}
+      </div>
+      <p className="mt-3 text-xs text-slate-500">Telefonda dosya paylaşım menüsüyle açılır (WhatsApp, Dosyalar vb.).</p>
+    </Sheet>
   )
 }
 

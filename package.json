@@ -30,6 +30,7 @@
     "react-router-dom": "^7.18.4",
     "read-excel-file": "^9.3.12",
     "web-push": "^3.6.7",
+    "write-excel-file": "^2.3.10",
     "zod": "^4.6.7"
   },
   "devDependencies": {

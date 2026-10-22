@@ -26,3 +26,17 @@ export function downloadFile(name: string, content: BlobPart, type: string) {
 export function downloadCsv(name: string, headers: string[], rows: Cell[][]) {
   downloadFile(name.endsWith('.csv') ? name : `${name}.csv`, '﻿' + toCsv(headers, rows), 'text/csv;charset=utf-8')
 }
+
+/** Telefonda paylaşım menüsü (WhatsApp, Dosyalar, AirDrop…), desteklenmiyorsa indirme */
+export async function saveOrShare(blob: Blob, name: string) {
+  const isTouch = typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches
+  if (isTouch && typeof navigator !== 'undefined' && 'canShare' in navigator) {
+    const file = new File([blob], name, { type: blob.type })
+    if (navigator.canShare?.({ files: [file] })) {
+      try { await navigator.share({ files: [file], title: name }); return } catch (e) {
+        if ((e as Error).name === 'AbortError') return
+      }
+    }
+  }
+  downloadFile(name, blob, blob.type)
+}
