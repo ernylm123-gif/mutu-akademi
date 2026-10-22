@@ -1,4 +1,4 @@
-import type { AttendanceStatus, InstallmentStatus, LessonStatus, PaymentMethod, AppRole } from '@/types/db'
+import type { AttendanceStatus, InstallmentStatus, LessonStatus, LessonType, PaymentMethod, PostponeReason, AppRole } from '@/types/db'
 
 const money = new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY', maximumFractionDigits: 2 })
 export const formatMoney = (n: number | string | null | undefined) => money.format(Number(n ?? 0))
@@ -11,13 +11,32 @@ export const LESSON_STATUS: Record<LessonStatus, { label: string; tone: Tone }> 
   planlandi: { label: 'Planlandı', tone: 'brand' },
   tamamlandi: { label: 'Tamamlandı', tone: 'green' },
   ertelendi: { label: 'Ertelendi', tone: 'amber' },
-  iptal: { label: 'İptal', tone: 'slate' },
+  iptal: { label: 'İptal edildi', tone: 'red' },
 }
 
 export const ATTENDANCE_STATUS: Record<AttendanceStatus, { label: string; tone: Tone }> = {
   katildi: { label: 'Katıldı', tone: 'green' },
   katilmadi: { label: 'Katılmadı', tone: 'red' },
   izinli: { label: 'İzinli', tone: 'amber' },
+  gec_geldi: { label: 'Geç geldi', tone: 'brand' },
+  erken_ayrildi: { label: 'Erken ayrıldı', tone: 'accent' },
+}
+
+export const ATTENDANCE_ORDER: AttendanceStatus[] = ['katildi', 'katilmadi', 'izinli', 'gec_geldi', 'erken_ayrildi']
+
+export const LESSON_TYPE: Record<LessonType, string> = { bireysel: 'Bireysel', grup: 'Grup', online: 'Online' }
+
+export const POSTPONE_REASON: Record<PostponeReason, string> = {
+  ogrenci: 'Öğrenci talebi', egitmen: 'Eğitmen talebi', tatil: 'Resmi tatil', saglik: 'Sağlık/mazeret', kurum: 'Kurum kaynaklı', diger: 'Diğer',
+}
+
+/** Planlama durumu + zamana göre görünen durum (Yaklaşıyor / Devam ediyor hesaplanır) */
+export function displayStatus(l: { status: LessonStatus; starts_at: string; ends_at: string; started_at?: string | null }, now = Date.now()) {
+  if (l.status !== 'planlandi') return LESSON_STATUS[l.status]
+  const s = new Date(l.starts_at).getTime(), e = new Date(l.ends_at).getTime()
+  if (l.started_at || (now >= s && now < e)) return { label: 'Devam ediyor', tone: 'accent' as Tone }
+  if (s > now && s - now <= 2 * 3600_000) return { label: 'Yaklaşıyor', tone: 'amber' as Tone }
+  return LESSON_STATUS.planlandi
 }
 
 export const INSTALLMENT_STATUS: Record<InstallmentStatus, { label: string; tone: Tone }> = {

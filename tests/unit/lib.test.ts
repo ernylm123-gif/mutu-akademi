@@ -65,7 +65,11 @@ describe('ders hakkı kuralları', () => {
   it('yoklama sonrası ders durumu', () => {
     expect(lessonStatusAfterAttendance('katildi')).toBe('tamamlandi')
     expect(lessonStatusAfterAttendance('katilmadi')).toBe('tamamlandi')
-    expect(lessonStatusAfterAttendance('izinli')).toBe('iptal')
+    // Planlama durumu yoklamadan ayrıdır: izinli öğrenci dersi iptal etmez, yalnızca hak düşmez
+    expect(lessonStatusAfterAttendance('izinli')).toBe('tamamlandi')
+    expect(consumesCredit('tamamlandi', 'gec_geldi', true)).toBe(true)
+    expect(consumesCredit('tamamlandi', 'erken_ayrildi', false)).toBe(true)
+    expect(consumesCredit('ertelendi', 'katildi', true)).toBe(false)
   })
   it('zaman aralığı çakışması', () => {
     expect(overlaps({ start: 0, end: 60 }, { start: 30, end: 90 })).toBe(true)

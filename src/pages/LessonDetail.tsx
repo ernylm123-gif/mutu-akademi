@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { Play, Check, UserX, Clock3, CalendarClock, Ban, Clock4, Phone, MessageCircle, User, GraduationCap, BookOpen, RotateCcw, Save } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
+import { Play, Check, UserX, CalendarClock, Ban, Clock4, Phone, MessageCircle, User, GraduationCap, BookOpen, RotateCcw, Save } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useLesson, useActivities, useDbMutation, lessonRpc, updateVersioned, useSettings } from '@/lib/api'
+import { supabase } from '@/lib/supabase'
 import { dateKey, formatDayLong, minutesBetween, timeHM } from '@/lib/time'
-import { ATTENDANCE_STATUS, LESSON_STATUS, telHref, waHref } from '@/lib/format'
+import { ATTENDANCE_STATUS, LESSON_STATUS, LESSON_TYPE, telHref, waHref } from '@/lib/format'
 import { consumesCredit } from '@/lib/rules'
 import type { AttendanceStatus } from '@/types/db'
 import { Badge, Button, Card, EmptyState, PageLoader, SectionTitle, Textarea } from '@/components/ui'
@@ -20,6 +22,16 @@ export function LessonDetailPage() {
   const { data: l, isLoading } = useLesson(id)
   const { data: history } = useActivities(30, id)
   const { data: settings } = useSettings()
+  // Ertelenmiş dersin yeni tarihli kaydı (eski ve yeni tarih birlikte görünür)
+  const { data: movedTo } = useQuery({
+    queryKey: ['lesson', 'moved', id, l?.status],
+    enabled: !!id && l?.status === 'ertelendi',
+    queryFn: async () => {
+      const { data, error } = await supabase.from('lessons').select('id, starts_at').eq('rescheduled_from', id!).order('id').limit(1).maybeSingle()
+      if (error) throw error
+      return data as { id: string; starts_at: string } | null
+    },
+  })
   const [mode, setMode] = useState<LessonMode | null>(null)
   const [notes, setNotes] = useState('')
   useEffect(() => setNotes(l?.notes ?? ''), [l?.id, l?.notes])
@@ -66,8 +78,15 @@ export function LessonDetailPage() {
               <span className="flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2.5 dark:bg-white/5"><GraduationCap className="size-4 text-slate-400" /><span className="truncate">{l.instructor?.full_name ?? 'Eğitmen yok'}</span></span>
               <span className="flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2.5 dark:bg-white/5"><BookOpen className="size-4 text-slate-400" /><span className="truncate">{l.course?.name ?? 'Kurs yok'}</span></span>
             </div>
-            {l.student && <p className="mt-3 text-sm text-slate-500">Kalan ders hakkı: <b className="text-slate-900 dark:text-white">{l.student.remaining_lessons}</b></p>}
-            {l.status_reason && <p className="mt-1 text-sm text-slate-500">Not: {l.status_reason}</p>}
+            {(l.title || l.room || l.lesson_type !== 'bireysel') && (
+              <p className="mt-3 text-sm text-slate-600">{[l.title, LESSON_TYPE[l.lesson_type], l.room?.name].filter(Boolean).join(' · ')}</p>
+            )}
+            {l.student && can.lessons && !l.group_id && <p className="mt-3 text-sm text-slate-500">Kalan ders hakkı: <b className="text-slate-900">{l.student.remaining_lessons}</b></p>}
+            {l.group_id && <p className="mt-3 text-sm text-slate-500">Grup dersi – öğrenciler ve yoklamalar için "Tamamla / yoklama".</p>}
+            {l.status_reason && <p className="mt-1 text-sm text-slate-500">{l.status === 'ertelendi' ? 'Erteleme nedeni' : l.status === 'iptal' ? 'İptal nedeni' : 'Not'}: {l.status_reason}</p>}
+            {l.rescheduled_from && <p className="mt-1 text-sm"><Link className="font-semibold text-brand-600" to={`/ders/${l.rescheduled_from}`}>← Ertelenen eski ders kaydı</Link></p>}
+            {movedTo && <p className="mt-1 text-sm"><Link className="font-semibold text-brand-600" to={`/ders/${movedTo.id}`}>Yeni tarih: {formatDayLong(dateKey(movedTo.starts_at))} {timeHM(movedTo.starts_at)} →</Link></p>}
+            {l.instructor_note && <p className="mt-1 text-sm text-slate-600"><b>Eğitmen notu:</b> {l.instructor_note}</p>}
             {l.student?.phone && can.staff && (
               <div className="mt-4 flex gap-2">
                 <a href={telHref(l.student.phone)} className="flex h-11 flex-1 items-center justify-center gap-2 rounded-2xl bg-brand-50 text-sm font-semibold text-brand-700 dark:bg-brand-500/15 dark:text-brand-300"><Phone className="size-4" /> Ara</a>
@@ -83,23 +102,22 @@ export function LessonDetailPage() {
           <SectionTitle>Hızlı işlemler</SectionTitle>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             {planned && !running && <Button size="lg" icon={<Play className="size-5" />} loading={start.isPending} disabled={busy} onClick={() => start.mutate(undefined)}>Dersi başlat</Button>}
-            {l.status !== 'ertelendi' && l.attendance?.status !== 'katildi' && (
-              <Button size="lg" className="bg-emerald-600 hover:bg-emerald-700" icon={<Check className="size-5" />} disabled={busy} onClick={() => mark.mutate('katildi')}>Tamamlandı</Button>
+            {(planned || l.status === 'tamamlandi') && (
+              <Button size="lg" className="bg-emerald-600 hover:bg-emerald-700" icon={<Check className="size-5" />} disabled={busy || new Date(l.starts_at).getTime() > Date.now() + 3600_000}
+                onClick={() => setMode('complete')}>{l.status === 'tamamlandi' ? 'Yoklamayı düzenle' : 'Tamamla / yoklama'}</Button>
             )}
-            {l.status !== 'ertelendi' && l.attendance?.status !== 'katilmadi' && (
+            {!l.group_id && planned && l.attendance?.status !== 'katilmadi' && new Date(l.starts_at).getTime() <= Date.now() + 3600_000 && (
               <Button size="lg" variant="danger" icon={<UserX className="size-5" />} disabled={busy} onClick={() => mark.mutate('katilmadi')}>Öğrenci gelmedi</Button>
-            )}
-            {l.status !== 'ertelendi' && l.attendance?.status !== 'izinli' && (
-              <Button size="lg" variant="secondary" icon={<Clock3 className="size-5" />} disabled={busy} onClick={() => mark.mutate('izinli')}>İzinli</Button>
             )}
             {can.lessons && planned && (
               <>
-                <Button size="lg" variant="secondary" icon={<CalendarClock className="size-5" />} onClick={() => setMode('reschedule')}>Ertele</Button>
+                <Button size="lg" variant="secondary" icon={<CalendarClock className="size-5" />} onClick={() => setMode('postpone')}>Ertele</Button>
                 <Button size="lg" variant="secondary" icon={<Clock4 className="size-5" />} onClick={() => setMode('edit')}>Saati değiştir</Button>
                 <Button size="lg" variant="secondary" className="text-red-600" icon={<Ban className="size-5" />} onClick={() => setMode('cancel')}>İptal</Button>
               </>
             )}
-            {l.attendance && <Button size="lg" variant="ghost" icon={<RotateCcw className="size-5" />} disabled={busy} onClick={() => clear.mutate(undefined)}>Yoklamayı geri al</Button>}
+            {can.lessons && l.status === 'iptal' && <Button size="lg" variant="secondary" icon={<RotateCcw className="size-5" />} onClick={() => setMode('view')}>İptali geri al…</Button>}
+            {!l.group_id && l.attendance && <Button size="lg" variant="ghost" icon={<RotateCcw className="size-5" />} disabled={busy} onClick={() => clear.mutate(undefined)}>Yoklamayı geri al</Button>}
           </div>
         </>
       )}

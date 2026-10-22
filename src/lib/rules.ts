@@ -8,7 +8,7 @@ export function consumesCredit(
   absenceConsumesCredit: boolean,
 ): boolean {
   if (lessonStatus !== 'tamamlandi' || !attendance) return false
-  if (attendance === 'katildi') return true
+  if (attendance === 'katildi' || attendance === 'gec_geldi' || attendance === 'erken_ayrildi') return true
   if (attendance === 'katilmadi') return absenceConsumesCredit
   return false
 }
@@ -18,9 +18,10 @@ export function remainingCredits(total: number, lessons: { status: LessonStatus;
   return { used, remaining: total - used }
 }
 
-/** Yoklama sonrası dersin alacağı durum (sunucudaki mark_attendance ile aynı) */
-export function lessonStatusAfterAttendance(a: AttendanceStatus): LessonStatus {
-  return a === 'izinli' ? 'iptal' : 'tamamlandi'
+/** Yoklama sonrası dersin alacağı durum (sunucudaki mark_attendance ile aynı): ders gerçekleşmiştir;
+ *  öğrencinin izinli olması dersin planlama durumunu değiştirmez, yalnızca hak düşmez. */
+export function lessonStatusAfterAttendance(_a: AttendanceStatus): LessonStatus {
+  return 'tamamlandi'
 }
 
 export interface Interval { start: number; end: number }

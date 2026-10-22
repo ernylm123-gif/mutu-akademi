@@ -5,15 +5,20 @@ import { useToast } from '@/components/ui/Toast'
 import type {
   AppNotification, AppSettings, AuditLog, Course, InstallmentView, Instructor, LessonWithRelations,
   Payment, Profile, DeviceInvite, Student, Activity, PushDelivery, StudentBalance, StudentNote, WeeklySchedule, AttendanceStatus, Lesson,
+  Room, InstructorAvailability, LessonPackage, ScheduleImport, ReportSummary, LessonPreview, ScopeItem,
 } from '@/types/db'
 
 // ---------------------------------------------------------------------------
 // Sorgu anahtarları ve Realtime eşlemesi
 // ---------------------------------------------------------------------------
 export const TABLE_KEYS: Record<string, string[]> = {
-  students: ['students', 'student', 'balances', 'lessons', 'lesson', 'student-lessons', 'reports', 'activities'],
-  lessons: ['lessons', 'lesson', 'student-lessons', 'students', 'student', 'reports', 'activities'],
-  attendance: ['lessons', 'lesson', 'student-lessons', 'students', 'student', 'reports', 'activities'],
+  students: ['students', 'student', 'balances', 'lessons', 'lesson', 'lesson-group', 'student-lessons', 'reports', 'activities'],
+  lessons: ['lessons', 'lesson', 'lesson-group', 'student-lessons', 'students', 'student', 'reports', 'activities'],
+  attendance: ['lessons', 'lesson', 'lesson-group', 'student-lessons', 'students', 'student', 'reports', 'activities'],
+  rooms: ['rooms', 'lessons', 'lesson', 'activities'],
+  instructor_availability: ['availability'],
+  lesson_packages: ['packages', 'students', 'student', 'balances', 'activities'],
+  schedule_imports: ['imports', 'activities'],
   payments: ['payments', 'installments', 'balances', 'reports', 'activities'],
   installments: ['installments', 'balances', 'activities'],
   notifications: ['notifications'],
@@ -28,7 +33,7 @@ export const TABLE_KEYS: Record<string, string[]> = {
 }
 
 const LESSON_SELECT =
-  '*, student:students(id,full_name,remaining_lessons,phone), instructor:instructors(id,full_name,color), course:courses(id,name,color), attendance(id,status,note)'
+  '*, student:students(id,full_name,remaining_lessons,phone), instructor:instructors(id,full_name,color), course:courses(id,name,color), room:rooms(id,name), attendance(id,status,note)'
 
 function normalizeLesson(row: Record<string, unknown>): LessonWithRelations {
   const att = row.attendance
@@ -67,6 +72,54 @@ export const useCourses = () =>
   useQuery({
     queryKey: ['courses'],
     queryFn: () => unwrap<Course[]>(supabase.from('courses').select('*').order('name')),
+  })
+
+export const useRooms = () =>
+  useQuery({
+    queryKey: ['rooms'],
+    queryFn: () => unwrap<Room[]>(supabase.from('rooms').select('*').order('name')),
+  })
+
+export const useAvailability = (instructorId?: string) =>
+  useQuery({
+    queryKey: ['availability', instructorId ?? 'all'],
+    queryFn: () => {
+      let q = supabase.from('instructor_availability').select('*').order('weekday').order('start_time')
+      if (instructorId) q = q.eq('instructor_id', instructorId)
+      return unwrap<InstructorAvailability[]>(q)
+    },
+  })
+
+export const usePackages = (studentId: string | undefined) =>
+  useQuery({
+    queryKey: ['packages', studentId],
+    enabled: !!studentId,
+    queryFn: () => unwrap<LessonPackage[]>(supabase.from('lesson_packages').select('*').eq('student_id', studentId!).order('created_at', { ascending: false })),
+  })
+
+export const useImports = (enabled = true) =>
+  useQuery({
+    queryKey: ['imports'],
+    enabled,
+    queryFn: () => unwrap<ScheduleImport[]>(supabase.from('schedule_imports').select('*').order('created_at', { ascending: false }).limit(10)),
+  })
+
+export const useReportSummary = (from: string, to: string, instructorId: string | null, enabled = true) =>
+  useQuery({
+    queryKey: ['reports', 'summary', from, to, instructorId],
+    enabled,
+    queryFn: () => unwrap<ReportSummary>(supabase.rpc('report_summary', { p_from: from, p_to: to, p_instructor: instructorId })),
+  })
+
+/** Grup dersinin tüm öğrencileri (her biri ayrı yoklama/hak) */
+export const useLessonGroup = (groupId: string | null | undefined) =>
+  useQuery({
+    queryKey: ['lesson-group', groupId],
+    enabled: !!groupId,
+    queryFn: async () => {
+      const rows = await unwrap<Record<string, unknown>[]>(supabase.from('lessons').select(LESSON_SELECT).eq('group_id', groupId!).order('id'))
+      return rows.map(normalizeLesson)
+    },
   })
 
 export const useProfiles = (enabled = true) =>
@@ -254,6 +307,51 @@ export async function insertRow<T>(table: string, row: Record<string, unknown>):
 export async function rpc<T>(fn: string, args: Record<string, unknown>): Promise<T> {
   return unwrap<T>(supabase.rpc(fn, args))
 }
+
+/** Tekrarlanan isteklerde çift işlem olmaması için tekil istek kimliği */
+export function newRequestId(): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID()
+  return 'xxxxxxxx-xxxx-4xxx-8xxx-xxxxxxxxxxxx'.replace(/x/g, () => Math.floor(Math.random() * 16).toString(16))
+}
+
+export type Scope = 'this' | 'following' | 'all'
+
+export interface LessonPlanInput {
+  student_ids: string[]
+  instructor_id: string | null
+  course_id: string | null
+  room_id: string | null
+  title: string | null
+  lesson_type: string
+  date: string
+  start: string
+  end: string
+  repeat?: { freq: string; weekdays?: number[]; interval_days?: number; until?: string }
+  notes?: string | null
+  instructor_note?: string | null
+  admin_note?: string | null
+}
+
+export const planRpc = {
+  preview: (p: LessonPlanInput) => rpc<LessonPreview>('preview_lessons', { p }),
+  create: (p: LessonPlanInput, skipConflicts: boolean, requestId: string) =>
+    rpc<{ created: number; skipped: number; series_id: string | null; first_lesson_id: string }>('create_lessons', { p, p_skip_conflicts: skipConflicts, p_request_id: requestId }),
+  scope: (lessonId: string, scope: Scope) => rpc<ScopeItem[]>('preview_lesson_scope', { p_lesson_id: lessonId, p_scope: scope }),
+  update: (l: Pick<Lesson, 'id' | 'version'>, changes: Record<string, unknown>, scope: Scope) =>
+    rpc<{ updated: number }>('update_lessons', { p_lesson_id: l.id, p_expected_version: l.version, p_changes: changes, p_scope: scope }),
+  remove: (l: Pick<Lesson, 'id' | 'version'>, scope: Scope) =>
+    rpc<{ deleted: number }>('delete_lessons', { p_lesson_id: l.id, p_expected_version: l.version, p_scope: scope }),
+  postpone: (l: Pick<Lesson, 'id' | 'version'>, start: Date, end: Date, reason: string, note: string | null, requestId: string) =>
+    rpc<{ new_lesson_id: string }>('postpone_lesson', {
+      p_lesson_id: l.id, p_expected_version: l.version, p_new_start: start.toISOString(), p_new_end: end.toISOString(),
+      p_reason: reason, p_note: note, p_request_id: requestId,
+    }),
+  restore: (l: Pick<Lesson, 'id' | 'version'>) => rpc<Lesson>('restore_lesson', { p_lesson_id: l.id, p_expected_version: l.version }),
+  complete: (l: Pick<Lesson, 'id' | 'version'>, attendance: { lesson_id: string; status: AttendanceStatus; note?: string | null }[], note: string | null) =>
+    rpc<{ completed: number }>('complete_lesson', { p_lesson_id: l.id, p_expected_version: l.version, p_attendance: attendance, p_instructor_note: note }),
+}
+
+export const LESSON_INVALIDATE = ['lessons', 'lesson', 'lesson-group', 'student-lessons', 'students', 'student', 'activities', 'reports']
 
 export const lessonRpc = {
   mark: (l: Pick<Lesson, 'id' | 'version'>, status: AttendanceStatus, note?: string | null) =>

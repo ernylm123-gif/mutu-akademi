@@ -1,6 +1,8 @@
 export type AppRole = 'admin' | 'egitmen' | 'personel'
 export type LessonStatus = 'planlandi' | 'tamamlandi' | 'ertelendi' | 'iptal'
-export type AttendanceStatus = 'katildi' | 'katilmadi' | 'izinli'
+export type AttendanceStatus = 'katildi' | 'katilmadi' | 'izinli' | 'gec_geldi' | 'erken_ayrildi'
+export type LessonType = 'bireysel' | 'grup' | 'online'
+export type PostponeReason = 'ogrenci' | 'egitmen' | 'tatil' | 'saglik' | 'kurum' | 'diger'
 export type PaymentMethod = 'nakit' | 'kart' | 'havale' | 'diger'
 export type InstallmentStatus = 'odendi' | 'gecikti' | 'kismi' | 'bekliyor'
 
@@ -166,9 +168,95 @@ export interface Lesson {
   rescheduled_from: string | null
   status_reason: string | null
   notes: string | null
+  title: string | null
+  room_id: string | null
+  lesson_type: LessonType
+  series_id: string | null
+  group_id: string | null
+  instructor_note: string | null
+  admin_note: string | null
+  postpone_reason: PostponeReason | null
+  import_id: string | null
   created_at: string
   updated_at: string
   version: number
+}
+
+export interface Room {
+  id: string
+  name: string
+  capacity: number | null
+  description: string | null
+  is_active: boolean
+}
+
+export interface InstructorAvailability {
+  id: string
+  instructor_id: string
+  weekday: number
+  start_time: string
+  end_time: string
+}
+
+export interface LessonPackage {
+  id: string
+  student_id: string
+  kind: 'paket' | 'duzeltme'
+  name: string
+  lesson_count: number
+  price: number
+  fee_added: boolean
+  purchased_at: string
+  note: string | null
+  is_void: boolean
+  void_reason: string | null
+  created_at: string
+}
+
+export interface ScheduleImport {
+  id: string
+  file_name: string | null
+  total_rows: number
+  created_count: number
+  skipped_count: number
+  summary: { problems?: { row: number; date?: string; reason: string }[]; new_students?: number } | null
+  created_at: string
+}
+
+export interface LessonPreview {
+  count: number
+  conflict_count: number
+  warning_count: number
+  students: number
+  lesson_type: LessonType
+  occurrences: { starts_at: string; ends_at: string; conflicts: string[]; warnings: string[] }[]
+}
+
+export interface ScopeItem { id: string; starts_at: string; ends_at: string; student_name: string | null; status: LessonStatus }
+
+export interface InstructorReport { id: string; name: string; total: number; completed: number; cancelled: number; postponed: number; absent: number; attended: number; hours: number }
+
+export interface ReportSummary {
+  active_students: number
+  new_students: number
+  today: number
+  this_week: number
+  this_month: number
+  sessions: number
+  planned: number
+  completed: number
+  cancelled: number
+  postponed: number
+  attendance_total: number
+  absent: number
+  excused: number
+  late: number
+  absence_rate: number
+  hours: number
+  by_instructor: InstructorReport[]
+  postpone_reasons: Record<string, number>
+  low_credit: { id: string; name: string; remaining: number; total: number }[]
+  pending_payments: { students: number; amount: number; overdue: number; overdue_amount: number } | null
 }
 
 export interface Attendance {
@@ -185,6 +273,7 @@ export interface LessonWithRelations extends Lesson {
   student: Pick<Student, 'id' | 'full_name' | 'remaining_lessons' | 'phone'> | null
   instructor: Pick<Instructor, 'id' | 'full_name' | 'color'> | null
   course: Pick<Course, 'id' | 'name' | 'color'> | null
+  room: Pick<Room, 'id' | 'name'> | null
   attendance: Pick<Attendance, 'id' | 'status' | 'note'> | null
 }
 

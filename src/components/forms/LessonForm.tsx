@@ -1,164 +1,297 @@
-import { useEffect, useMemo } from 'react'
-import { useForm, Controller } from 'react-hook-form'
-import { zodResolver } from '@hookform/resolvers/zod'
-import { lessonSchema, type LessonFormInput, type LessonFormValues } from '@/lib/schemas'
-import { useStudents, useInstructors, useCourses, useDbMutation, insertRow, lessonRpc } from '@/lib/api'
-import { addMonths, dateKey, fromIstanbul, isoWeekday, WEEKDAYS } from '@/lib/time'
-import type { Lesson, WeeklySchedule } from '@/types/db'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import clsx from 'clsx'
+import { AlertTriangle, CheckCircle2, Info } from 'lucide-react'
+import { useAuth } from '@/hooks/useAuth'
+import { useStudents, useInstructors, useCourses, useRooms, useDbMutation, planRpc, newRequestId, LESSON_INVALIDATE, type LessonPlanInput } from '@/lib/api'
+import { addMonths, dateKey, formatDayShort, isoWeekday, timeHM, WEEKDAYS, WEEKDAYS_SHORT } from '@/lib/time'
+import { errorMessage } from '@/lib/errors'
+import { LESSON_TYPE } from '@/lib/format'
 import { frequentTimes } from '@/lib/recent'
-import { Button, Field, Input, Select, Sheet, Textarea, Toggle } from '@/components/ui'
+import type { LessonPreview, LessonType } from '@/types/db'
+import { Button, Field, Input, Segmented, Select, Sheet, Textarea } from '@/components/ui'
+import { SearchSelect } from '@/components/ui/SearchSelect'
+
+type Freq = 'yok' | 'gunluk' | 'haftalik' | 'gunler' | 'iki_haftalik' | 'ozel'
+const FREQS: { value: Freq; label: string }[] = [
+  { value: 'yok', label: 'Tek seferlik' },
+  { value: 'gunluk', label: 'Her gün' },
+  { value: 'haftalik', label: 'Her hafta' },
+  { value: 'gunler', label: 'Belirli hafta günlerinde' },
+  { value: 'iki_haftalik', label: 'İki haftada bir' },
+  { value: 'ozel', label: 'Özel (her N günde bir)' },
+]
+const DURATIONS = [45, 60, 90, 120]
+
+const toMin = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + m }
+const toHM = (m: number) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`
+
+interface State {
+  students: string[]
+  instructor: string
+  course: string
+  room: string
+  title: string
+  type: LessonType
+  date: string
+  start: string
+  end: string
+  freq: Freq
+  weekdays: number[]
+  interval: number
+  until: string
+  notes: string
+  instructorNote: string
+  adminNote: string
+}
 
 export function LessonFormSheet({ open, onClose, defaults }: {
   open: boolean
   onClose: () => void
-  defaults?: Partial<Pick<LessonFormInput, 'student_id' | 'date' | 'time' | 'instructor_id'>>
+  defaults?: { student_id?: string; date?: string; time?: string; instructor_id?: string }
 }) {
+  const { can } = useAuth()
   const { data: students } = useStudents()
   const { data: instructors } = useInstructors()
   const { data: courses } = useCourses()
-  const form = useForm<LessonFormInput, unknown, LessonFormValues>({ resolver: zodResolver(lessonSchema) })
-  const { register, handleSubmit, reset, watch, setValue, control, formState: { errors, isDirty } } = form
+  const { data: rooms } = useRooms()
+  const [v, setV] = useState<State | null>(null)
+  const [dirty, setDirty] = useState(false)
+  const [preview, setPreview] = useState<LessonPreview | null>(null)
+  const [previewErr, setPreviewErr] = useState<string | null>(null)
+  const [checking, setChecking] = useState(false)
+  const requestId = useRef(newRequestId())
 
   useEffect(() => {
     if (!open) return
     const date = defaults?.date ?? dateKey()
-    reset({
-      student_id: defaults?.student_id ?? '',
-      instructor_id: defaults?.instructor_id ?? '',
-      date,
-      time: defaults?.time ?? '10:00',
-      duration_minutes: 60,
-      notes: '',
-      repeat_weekly: false,
-      repeat_until: addMonths(date, 2),
+    const start = defaults?.time ?? '10:00'
+    const st = students?.find((s) => s.id === defaults?.student_id)
+    const dur = courses?.find((c) => c.id === st?.course_id)?.duration_minutes ?? 60
+    setV({
+      students: defaults?.student_id ? [defaults.student_id] : [],
+      instructor: defaults?.instructor_id ?? st?.instructor_id ?? '',
+      course: st?.course_id ?? '',
+      room: '', title: '', type: 'bireysel', date, start, end: toHM(toMin(start) + dur),
+      freq: 'yok', weekdays: [isoWeekday(date)], interval: 7, until: addMonths(date, 3),
+      notes: '', instructorNote: '', adminNote: '',
     })
-  }, [open, defaults, reset])
+    setDirty(false)
+    setPreview(null)
+    setPreviewErr(null)
+    requestId.current = newRequestId()
+  }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const studentId = watch('student_id')
-  const repeat = watch('repeat_weekly')
-  const date = watch('date')
-  const student = useMemo(() => students?.find((s) => s.id === studentId), [students, studentId])
+  const set = (patch: Partial<State>) => { setV((s) => (s ? { ...s, ...patch } : s)); setDirty(true) }
 
-  // Öğrenci seçilince eğitmen ve süreyi otomatik doldur
+  // İlk öğrenci seçilince kurs, eğitmen ve süre otomatik doldurulur
+  const firstStudent = v?.students[0]
   useEffect(() => {
-    if (!student) return
-    if (student.instructor_id && !defaults?.instructor_id) setValue('instructor_id', student.instructor_id)
-    const c = courses?.find((x) => x.id === student.course_id)
-    if (c) setValue('duration_minutes', c.duration_minutes)
-  }, [student, courses, setValue, defaults?.instructor_id])
+    if (!v || !firstStudent || v.students.length !== 1) return
+    const st = students?.find((s) => s.id === firstStudent)
+    if (!st) return
+    const patch: Partial<State> = {}
+    if (!v.instructor && st.instructor_id) patch.instructor = st.instructor_id
+    if (!v.course && st.course_id) {
+      patch.course = st.course_id
+      const c = courses?.find((x) => x.id === st.course_id)
+      if (c) patch.end = toHM(toMin(v.start) + c.duration_minutes)
+    }
+    if (Object.keys(patch).length) setV((s) => (s ? { ...s, ...patch } : s))
+  }, [firstStudent]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const duration = v && /^\d\d:\d\d$/.test(v.start) && /^\d\d:\d\d$/.test(v.end) ? toMin(v.end) - toMin(v.start) : 0
+  const effectiveType: LessonType = v ? (v.type === 'bireysel' && v.students.length > 1 ? 'grup' : v.type) : 'bireysel'
+
+  const input = useMemo<LessonPlanInput | null>(() => {
+    if (!v || v.students.length === 0 || !v.date || duration <= 0) return null
+    const repeat = v.freq === 'yok' ? undefined
+      : v.freq === 'gunler' ? { freq: 'haftalik', weekdays: v.weekdays, until: v.until }
+      : v.freq === 'haftalik' ? { freq: 'haftalik', weekdays: [isoWeekday(v.date)], until: v.until }
+      : v.freq === 'iki_haftalik' ? { freq: 'iki_haftalik', weekdays: v.weekdays.length ? v.weekdays : [isoWeekday(v.date)], until: v.until }
+      : v.freq === 'ozel' ? { freq: 'ozel', interval_days: v.interval, until: v.until }
+      : { freq: 'gunluk', until: v.until }
+    return {
+      student_ids: v.students, instructor_id: v.instructor || null, course_id: v.course || null,
+      room_id: effectiveType === 'online' ? null : v.room || null, title: v.title.trim() || null, lesson_type: effectiveType,
+      date: v.date, start: v.start, end: v.end, repeat,
+      notes: v.notes.trim() || null, instructor_note: v.instructorNote.trim() || null, admin_note: v.adminNote.trim() || null,
+    }
+  }, [v, duration, effectiveType])
+
+  // Çakışma / müsaitlik ön kontrolü (yazarken sunucudan)
+  const key = input ? JSON.stringify({ ...input, notes: null, instructor_note: null, admin_note: null, title: null }) : ''
+  useEffect(() => {
+    if (!open || !input) { setPreview(null); return }
+    let alive = true
+    setChecking(true)
+    const t = setTimeout(() => {
+      planRpc.preview(input)
+        .then((p) => { if (alive) { setPreview(p); setPreviewErr(null) } })
+        .catch((e) => { if (alive) { setPreview(null); setPreviewErr(errorMessage(e)) } })
+        .finally(() => { if (alive) setChecking(false) })
+    }, 350)
+    return () => { alive = false; clearTimeout(t) }
+  }, [key, open]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const save = useDbMutation(
-    async (v: LessonFormValues) => {
-      const st = students?.find((s) => s.id === v.student_id)
-      if (v.repeat_weekly) {
-        frequentTimes.add(v.time)
-        const sched = await insertRow<WeeklySchedule>('weekly_schedules', {
-          student_id: v.student_id,
-          instructor_id: v.instructor_id,
-          weekday: isoWeekday(v.date),
-          start_time: v.time,
-          duration_minutes: v.duration_minutes,
-        })
-        const r = await lessonRpc.generate(sched.id, v.date, v.repeat_until!)
-        return { repeat: true as const, ...r }
-      }
-      const start = fromIstanbul(v.date, v.time)
-      const end = new Date(start.getTime() + v.duration_minutes * 60000)
-      await insertRow<Lesson>('lessons', {
-        student_id: v.student_id,
-        instructor_id: v.instructor_id,
-        course_id: st?.course_id ?? null,
-        starts_at: start.toISOString(),
-        ends_at: end.toISOString(),
-        notes: v.notes,
-      })
-      return { repeat: false as const, created: 1, skipped: 0 }
+    (skip: boolean) => {
+      if (!input) throw new Error('Öğrenci, tarih ve saat seçin.')
+      frequentTimes.add(input.start)
+      return planRpc.create(input, skip, requestId.current)
     },
     {
-      success: (r) =>
-        r.repeat
-          ? `${r.created} ders oluşturuldu${r.skipped ? `, ${r.skipped} ders çakışma nedeniyle atlandı` : ''}`
-          : 'Ders oluşturuldu',
-      invalidate: ['lessons', 'student-lessons', 'schedules'],
+      success: (r) => (r.created > 1 ? `${r.created} ders oluşturuldu` : 'Ders oluşturuldu') + (r.skipped ? `, ${r.skipped} çakışan tarih atlandı` : ''),
+      invalidate: LESSON_INVALIDATE,
       onSuccess: onClose,
     },
   )
 
-  const activeStudents = students?.filter((s) => s.is_active) ?? []
-  const time = watch('time')
-  const duration = Number(watch('duration_minutes')) || 0
-  const endTime = /^\d{2}:\d{2}$/.test(time ?? '') && duration > 0
-    ? (() => { const [h, m] = time!.split(':').map(Number); const t = h * 60 + m + duration; return `${String(Math.floor(t / 60) % 24).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}` })()
-    : null
+  if (!v) return null
+  const studentOpts = (students ?? []).filter((s) => s.is_active || v.students.includes(s.id))
+    .map((s) => ({ value: s.id, label: s.full_name, hint: s.total_lessons > 0 ? `${s.remaining_lessons} hak` : undefined }))
+  const noCredit = (students ?? []).filter((s) => v.students.includes(s.id) && s.total_lessons > 0 && s.remaining_lessons <= 0)
+  const room = rooms?.find((r) => r.id === v.room)
+  const conflicts = preview?.occurrences.filter((o) => o.conflicts.length) ?? []
+  const warnings = preview?.occurrences.filter((o) => o.warnings.length) ?? []
+  const allConflict = !!preview && preview.conflict_count === preview.count
   const times = frequentTimes.get()
-  const course = courses?.find((c) => c.id === student?.course_id)
+  const validation = v.students.length === 0 ? 'En az bir öğrenci seçin.' : duration <= 0 ? 'Bitiş saati başlangıçtan sonra olmalı.' : duration > 600 ? 'Ders en fazla 10 saat olabilir.' : null
 
   return (
-    <Sheet open={open} onClose={onClose} title="Yeni ders" dirty={isDirty && !save.isPending}
+    <Sheet open={open} onClose={onClose} title="Yeni ders" dirty={dirty && !save.isPending} wide
       footer={
-        <div className="flex gap-2">
-          <Button variant="secondary" block onClick={onClose}>Vazgeç</Button>
-          <Button block loading={save.isPending} onClick={handleSubmit((v) => save.mutate(v))}>Oluştur</Button>
+        <div className="grid gap-2">
+          {preview && preview.conflict_count > 0 && !allConflict && (
+            <Button variant="secondary" block loading={save.isPending} onClick={() => save.mutate(true)}>
+              Çakışan {preview.conflict_count} tarihi atla, {preview.count - preview.conflict_count} ders oluştur
+            </Button>
+          )}
+          <div className="flex gap-2">
+            <Button variant="secondary" block onClick={onClose}>Vazgeç</Button>
+            <Button block loading={save.isPending} disabled={!!validation || !preview || preview.conflict_count > 0 || checking}
+              onClick={() => save.mutate(false)}>
+              {preview && preview.count > 1 ? `${preview.count} dersi oluştur` : 'Dersi oluştur'}
+            </Button>
+          </div>
         </div>
       }
     >
-      <form className="grid gap-4" onSubmit={handleSubmit((v) => save.mutate(v))} noValidate>
-        <Field label="Öğrenci *" error={errors.student_id?.message}>
-          <Select {...register('student_id')}>
-            <option value="">Öğrenci seçin</option>
-            {activeStudents.map((s) => (
-              <option key={s.id} value={s.id}>{s.full_name} ({s.remaining_lessons} hak)</option>
-            ))}
-          </Select>
+      <form className="grid gap-4" onSubmit={(e) => { e.preventDefault(); if (!validation && preview && !preview.conflict_count) save.mutate(false) }} noValidate>
+        <Field label={`Öğrenci${v.students.length > 1 ? `ler (${v.students.length}) – grup dersi` : ''} *`}>
+          <SearchSelect multiple options={studentOpts} value={v.students} onChange={(x) => set({ students: x })} placeholder="Öğrenci ara ve seç (birden fazla seçilebilir)" ariaLabel="Öğrenciler" />
         </Field>
-        {student && student.total_lessons > 0 && student.remaining_lessons <= 0 && (
-          <p className="rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-500/15 dark:text-amber-300">
-            Bu öğrencinin kalan ders hakkı yok. Ders yine de planlanabilir.
-          </p>
+        {noCredit.length > 0 && (
+          <p className="rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-800">{noCredit.map((s) => s.full_name).join(', ')}: kalan ders hakkı yok. Ders yine de planlanabilir.</p>
         )}
-        <Field label="Eğitmen">
-          <Select {...register('instructor_id')}>
-            <option value="">Atanmadı</option>
-            {instructors?.filter((i) => i.is_active).map((i) => <option key={i.id} value={i.id}>{i.full_name}</option>)}
-          </Select>
-        </Field>
-        <div className="grid grid-cols-3 gap-3">
-          <Field label="Tarih" error={errors.date?.message} className="col-span-3 sm:col-span-1">
-            <Input type="date" {...register('date')} />
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Eğitmen">
+            <SearchSelect options={(instructors ?? []).filter((i) => i.is_active || i.id === v.instructor).map((i) => ({ value: i.id, label: i.full_name, hint: i.specialty ?? undefined }))}
+              value={v.instructor ? [v.instructor] : []} onChange={(x) => set({ instructor: x[0] ?? '' })} placeholder="Eğitmen ara" emptyLabel="Eğitmen atanmadı" ariaLabel="Eğitmen" />
           </Field>
-          <Field label="Saat" error={errors.time?.message} className="col-span-2 sm:col-span-1">
-            <Input type="time" step={300} {...register('time')} />
-          </Field>
-          <Field label="Süre (dk)" error={errors.duration_minutes?.message}>
-            <Input type="number" inputMode="numeric" min={10} step={5} {...register('duration_minutes')} />
+          <Field label="Kurs">
+            <SearchSelect options={(courses ?? []).filter((c) => c.is_active || c.id === v.course).map((c) => ({ value: c.id, label: c.name }))}
+              value={v.course ? [v.course] : []} onChange={(x) => set({ course: x[0] ?? '' })} placeholder="Kurs ara" emptyLabel="Öğrencinin kursu" ariaLabel="Kurs" />
           </Field>
         </div>
-        {(times.length > 0 || endTime) && (
-          <div className="-mt-2 flex flex-wrap items-center gap-2">
-            {times.map((t) => (
-              <button key={t} type="button" onClick={() => setValue('time', t, { shouldDirty: true })}
-                className={`h-9 rounded-full px-3 text-sm font-semibold ${t === time ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-700 dark:bg-white/10 dark:text-slate-200'}`}>{t}</button>
-            ))}
-            {endTime && <span className="ml-auto text-sm text-slate-500">Bitiş: <b className="text-slate-900 dark:text-white">{endTime}</b></span>}
+        <Field label="Ders konusu / başlığı">
+          <Input value={v.title} maxLength={120} onChange={(e) => set({ title: e.target.value })} placeholder="Ör. Python – Döngüler" />
+        </Field>
+        <div>
+          <p className="mb-1.5 text-sm font-semibold">Ders türü</p>
+          <Segmented value={effectiveType} onChange={(t) => set({ type: t })} options={(['bireysel', 'grup', 'online'] as LessonType[]).map((t) => ({ value: t, label: LESSON_TYPE[t] }))} />
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <Field label="Tarih" className="col-span-2 sm:col-span-2">
+            <Input type="date" value={v.date} onChange={(e) => set({ date: e.target.value, weekdays: v.freq === 'gunler' ? v.weekdays : [isoWeekday(e.target.value)] })} />
+          </Field>
+          <Field label="Başlangıç">
+            <Input type="time" step={300} value={v.start} onChange={(e) => { const s = e.target.value; set({ start: s, end: /^\d\d:\d\d$/.test(s) && duration > 0 ? toHM(toMin(s) + duration) : v.end }) }} />
+          </Field>
+          <Field label="Bitiş">
+            <Input type="time" step={300} value={v.end} onChange={(e) => set({ end: e.target.value })} />
+          </Field>
+        </div>
+        <div className="-mt-2 flex flex-wrap items-center gap-2">
+          {DURATIONS.map((d) => (
+            <button key={d} type="button" onClick={() => set({ end: toHM(toMin(v.start) + d) })}
+              className={clsx('h-10 rounded-full px-3.5 text-sm font-semibold', duration === d ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-700')}>{d} dk</button>
+          ))}
+          <span className={clsx('h-10 rounded-full px-3.5 text-sm font-semibold leading-10', !DURATIONS.includes(duration) && duration > 0 ? 'bg-brand-600 text-white' : 'bg-slate-50 text-slate-500')}>
+            {!DURATIONS.includes(duration) && duration > 0 ? `Özel: ${duration} dk` : 'Özel süre: bitişi değiştirin'}
+          </span>
+        </div>
+        {times.length > 0 && (
+          <div className="-mt-2 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
+            Sık kullanılan:
+            {times.map((t) => <button key={t} type="button" onClick={() => set({ start: t, end: toHM(toMin(t) + Math.max(duration, 30)) })} className="h-8 rounded-full bg-slate-100 px-2.5 font-semibold text-slate-700">{t}</button>)}
           </div>
         )}
-        {student && (
-          <p className="-mt-1 text-xs text-slate-500">{course ? `${course.name} · ${course.duration_minutes} dk` : 'Kurs atanmamış'}{student.instructor_id ? ' · kayıtlı eğitmen seçildi' : ''}</p>
-        )}
-        <Controller control={control} name="repeat_weekly" render={({ field }) => (
-          <Toggle checked={field.value} onChange={field.onChange} label="Her hafta tekrarla"
-            description={date ? `Her ${WEEKDAYS[isoWeekday(date) - 1]} aynı saatte` : undefined} />
-        )} />
-        {repeat && (
-          <Field label="Tekrar bitiş tarihi" error={errors.repeat_until?.message} hint="Çakışan haftalar otomatik atlanır.">
-            <Input type="date" {...register('repeat_until')} />
+
+        {effectiveType !== 'online' && (
+          <Field label="Sınıf / oda" hint={room?.capacity ? `Kapasite: ${room.capacity} kişi` : undefined}>
+            <Select value={v.room} onChange={(e) => set({ room: e.target.value })}>
+              <option value="">Sınıf seçilmedi</option>
+              {rooms?.filter((r) => r.is_active || r.id === v.room).map((r) => <option key={r.id} value={r.id}>{r.name}{r.capacity ? ` (${r.capacity} kişi)` : ''}</option>)}
+            </Select>
           </Field>
         )}
-        {!repeat && (
-          <Field label="Not">
-            <Textarea rows={2} {...register('notes')} />
-          </Field>
+
+        <Field label="Tekrarlama">
+          <Select value={v.freq} onChange={(e) => set({ freq: e.target.value as Freq })}>
+            {FREQS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+          </Select>
+        </Field>
+        {(v.freq === 'gunler' || v.freq === 'iki_haftalik') && (
+          <div className="-mt-2 grid grid-cols-7 gap-1.5" role="group" aria-label="Hafta günleri">
+            {WEEKDAYS_SHORT.map((w, i) => {
+              const on = v.weekdays.includes(i + 1)
+              return (
+                <button key={w} type="button" aria-pressed={on} onClick={() => set({ weekdays: on ? v.weekdays.filter((x) => x !== i + 1) : [...v.weekdays, i + 1].sort() })}
+                  className={clsx('h-11 rounded-xl text-sm font-semibold', on ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-600')}>{w}</button>
+              )
+            })}
+          </div>
         )}
+        {v.freq === 'ozel' && (
+          <Field label="Kaç günde bir?"><Input type="number" min={1} max={90} value={v.interval} onChange={(e) => set({ interval: Number(e.target.value) || 1 })} /></Field>
+        )}
+        {v.freq !== 'yok' && (
+          <div className="-mt-1 grid gap-2">
+            <Field label="Tekrar bitiş tarihi"><Input type="date" value={v.until} min={v.date} onChange={(e) => set({ until: e.target.value })} /></Field>
+            <div className="flex gap-2">
+              {[1, 3, 6].map((m) => <button key={m} type="button" onClick={() => set({ until: addMonths(v.date, m) })} className="h-9 rounded-full bg-slate-100 px-3 text-sm font-semibold text-slate-700">{m} ay</button>)}
+            </div>
+            {v.freq === 'haftalik' && <p className="text-xs text-slate-500">Her {WEEKDAYS[isoWeekday(v.date) - 1]} {v.start}–{v.end}</p>}
+          </div>
+        )}
+
+        <Field label="Ders notu"><Textarea rows={2} value={v.notes} onChange={(e) => set({ notes: e.target.value })} /></Field>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Eğitmen notu"><Textarea rows={2} value={v.instructorNote} onChange={(e) => set({ instructorNote: e.target.value })} /></Field>
+          {can.lessons && <Field label="Yönetici açıklaması" hint="Yalnızca yetkili cihazlarda görünür."><Textarea rows={2} value={v.adminNote} onChange={(e) => set({ adminNote: e.target.value })} /></Field>}
+        </div>
+
+        <div aria-live="polite" className="rounded-2xl border border-slate-200 p-3 text-sm">
+          {validation ? <p className="flex items-center gap-2 text-slate-500"><Info className="size-4" />{validation}</p>
+            : previewErr ? <p className="flex items-center gap-2 text-red-700"><AlertTriangle className="size-4" />{previewErr}</p>
+            : !preview || checking ? <p className="text-slate-500">Çakışma kontrol ediliyor…</p>
+            : (
+              <div className="space-y-1.5">
+                <p className={clsx('flex items-center gap-2 font-semibold', preview.conflict_count ? 'text-red-700' : 'text-emerald-700')}>
+                  {preview.conflict_count ? <AlertTriangle className="size-4" /> : <CheckCircle2 className="size-4" />}
+                  {preview.count} ders{preview.students > 1 ? ` · ${preview.students} öğrenci` : ''} · {duration} dk{preview.conflict_count ? ` · ${preview.conflict_count} çakışma` : ' · çakışma yok'}
+                </p>
+                {conflicts.slice(0, 4).map((o) => (
+                  <p key={o.starts_at} className="text-red-700">{formatDayShort(dateKey(o.starts_at))} {timeHM(o.starts_at)}: {o.conflicts.join('; ')}</p>
+                ))}
+                {conflicts.length > 4 && <p className="text-red-700">+{conflicts.length - 4} çakışma daha</p>}
+                {warnings.slice(0, 3).map((o) => (
+                  <p key={`w${o.starts_at}`} className="text-amber-700">{formatDayShort(dateKey(o.starts_at))} {timeHM(o.starts_at)}: {o.warnings.join('; ')}</p>
+                ))}
+              </div>
+            )}
+        </div>
         <button type="submit" hidden />
       </form>
     </Sheet>
