@@ -20,6 +20,7 @@ const ICONS: Record<string, { icon: typeof Bell; cls: string }> = {
   yaklasan_odeme: { icon: Wallet, cls: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15' },
   duyuru: { icon: Megaphone, cls: 'bg-brand-50 text-brand-600' },
   ders_yeni: { icon: CalendarPlus, cls: 'bg-emerald-50 text-emerald-600' },
+  ders_tamamlandi: { icon: CheckCheck, cls: 'bg-emerald-50 text-emerald-600' },
   gecikmis_odeme: { icon: Wallet, cls: 'bg-red-50 text-red-600 dark:bg-red-500/15' },
 }
 

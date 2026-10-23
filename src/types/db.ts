@@ -47,6 +47,11 @@ export interface NotificationPrefs {
   ders_iptal?: boolean
   ders_degisiklik?: boolean
   ders_yeni?: boolean
+  lesson_start?: boolean
+  lesson_end15?: boolean
+  lesson_end?: boolean
+  ders_tamamlandi?: boolean
+  grupla?: boolean
   yeni_ogrenci?: boolean
   dusuk_ders_hakki?: boolean
   devamsizlik?: boolean

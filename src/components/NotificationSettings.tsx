@@ -14,6 +14,10 @@ const GROUPS: { title: string; items: { key: keyof NotificationPrefs; label: str
   { title: 'Ders', items: [
     { key: 'lesson_60', label: 'Dersten 1 saat önce' },
     { key: 'lesson_15', label: 'Dersten 15 dakika önce' },
+    { key: 'lesson_start', label: 'Ders saati geldiğinde (yoklama hatırlatması)' },
+    { key: 'lesson_end15', label: 'Dersin bitmesine 15 dakika kala' },
+    { key: 'lesson_end', label: 'Ders süresi dolduğunda (tamamla hatırlatması)' },
+    { key: 'ders_tamamlandi', label: 'Ders tamamlandığında' },
     { key: 'ders_iptal', label: 'Ders iptal edildiğinde', important: true },
     { key: 'ders_degisiklik', label: 'Ders ertelendiğinde / saati değiştiğinde', important: true },
     { key: 'ders_yeni', label: 'Yeni ders oluşturulduğunda / program içe aktarıldığında' },
@@ -123,6 +127,10 @@ export function NotificationSettings() {
 
       <SectionTitle>Sessiz saatler</SectionTitle>
       <Card className="p-4">
+        <div className="mb-3 border-b border-slate-100 pb-3">
+          <Toggle checked={!!prefs.grupla} onChange={(v) => set('grupla', v)} label="Bildirimleri grupla"
+            description="Aynı türdeki ders bildirimleri kilit ekranında üst üste birikmez; en yenisi öncekinin yerini alır." />
+        </div>
         <Toggle checked={!!prefs.quiet_enabled} onChange={(v) => set('quiet_enabled', v)} label="Sessiz saatleri kullan" description="Bu saatlerde rutin hatırlatmalar gönderilmez; ders iptali gibi önemli bildirimler gelmeye devam eder." />
         {prefs.quiet_enabled && (
           <div className="mt-3 grid grid-cols-2 gap-3">
