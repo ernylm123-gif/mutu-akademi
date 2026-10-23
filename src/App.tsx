@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
-import { PublicSchedulePage } from '@/pages/PublicSchedule'
+import { SharedApp } from '@/pages/SharedApp'
 import { useAuth } from '@/hooks/useAuth'
 import { supabaseConfigured } from '@/lib/supabase'
 import { clearLinkKey, readLinkKey } from '@/lib/pairing'
@@ -60,7 +60,7 @@ function Protected() {
     if (profile?.approved && !profile.is_active) return <PendingApprovalPage />
     return <DeviceGate linkKey={null} />
   } else {
-    return <PublicSchedulePage />
+    return <SharedApp />
   }
   return (
     <Suspense fallback={<PageLoader />}>

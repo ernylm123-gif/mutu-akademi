@@ -228,6 +228,8 @@ export function Segmented<T extends string>({ value, onChange, options }: { valu
 // ---------------------------------------------------------------------------
 const DIRTY_MSG = 'Kaydedilmemiş değişiklikler var. Çıkmak istediğinize emin misiniz?'
 
+const openSheets = new Set<string>()
+
 export function Sheet({ open, onClose, title, children, footer, wide, dirty }: { open: boolean; onClose: () => void; title: string; children: ReactNode; footer?: ReactNode; wide?: boolean; dirty?: boolean }) {
   const onCloseRef = useRef(onClose)
   const dirtyRef = useRef(dirty)
@@ -244,7 +246,12 @@ export function Sheet({ open, onClose, title, children, footer, wide, dirty }: {
     // Android geri tuşu / tarayıcı geri hareketi paneli kapatsın
     const id = Math.random().toString(36).slice(2)
     let closing = false
-    window.history.pushState({ ...(window.history.state ?? {}), mutuSheet: id }, '')
+    // Bir panel kapanıp hemen başkası açılıyorsa (ör. detay → düzenle) aynı geçmiş kaydı devralınır;
+    // aksi halde kapanan panelin gecikmeli "geri" adımı yeni paneli de kapatırdı.
+    const top = window.history.state?.mutuSheet as string | undefined
+    if (top && !openSheets.has(top)) window.history.replaceState({ ...(window.history.state ?? {}), mutuSheet: id }, '')
+    else window.history.pushState({ ...(window.history.state ?? {}), mutuSheet: id }, '')
+    openSheets.add(id)
     const onPop = () => {
       if (closing) return
       if (dirtyRef.current && !window.confirm(DIRTY_MSG)) {
@@ -263,7 +270,9 @@ export function Sheet({ open, onClose, title, children, footer, wide, dirty }: {
       window.removeEventListener('popstate', onPop)
       document.removeEventListener('keydown', onKey)
       document.body.style.overflow = prev
-      if (!closing && window.history.state?.mutuSheet === id) window.history.back()
+      openSheets.delete(id)
+      // Aynı anda açılan yeni panel kaydı devralmadıysa geçmişten çık
+      setTimeout(() => { if (!closing && window.history.state?.mutuSheet === id) window.history.back() }, 0)
     }
   }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
 

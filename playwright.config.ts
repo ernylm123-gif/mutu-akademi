@@ -10,10 +10,10 @@ export default defineConfig({
   reporter: [['list']],
   use: { baseURL, locale: 'tr-TR', timezoneId: 'Europe/Istanbul', trace: 'retain-on-failure' },
   projects: [
-    { name: 'mobil', testIgnore: /ios\.spec/, use: { ...devices['Pixel 7'], channel: process.env.PW_CHANNEL || undefined } },
-    { name: 'masaustu', testIgnore: /ios\.spec/, use: { ...devices['Desktop Chrome'], channel: process.env.PW_CHANNEL || undefined } },
+    { name: 'mobil', testIgnore: /(ios|shared)\.spec/, use: { ...devices['Pixel 7'], channel: process.env.PW_CHANNEL || undefined } },
+    { name: 'masaustu', testIgnore: /(ios|shared)\.spec/, use: { ...devices['Desktop Chrome'], channel: process.env.PW_CHANNEL || undefined } },
     // iPhone (WebKit motoru) ve Android Chrome açılış senaryoları
-    { name: 'iphone-webkit', testMatch: /ios\.spec/, use: { ...devices['iPhone 13'] } },
+    { name: 'iphone-webkit', testMatch: /(ios|shared)\.spec/, use: { ...devices['iPhone 13'] } },
     { name: 'android-chrome', testMatch: /ios\.spec/, use: { ...devices['Pixel 7'], channel: process.env.PW_CHANNEL || undefined } },
   ],
   webServer: local
