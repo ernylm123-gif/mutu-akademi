@@ -546,5 +546,97 @@ r = await as(admin, `select public.postpone_lesson($1, null, $2, $3, 'egitmen') 
 r = await db.query(`select body from public.notifications where user_id=$1 and title='Ders ertelendi' order by created_at desc limit 1`, [phone2])
 ok('erteleme bildirimi diğer cihaza yeni tarih/saatle gider', /yerine .*ertelendi/.test(r.rows[0]?.body ?? ''), JSON.stringify(r.rows))
 
+// --- Girişsiz ORTAK ders alanı ---
+const sd = (days) => istDate(days)
+const base = { course_name: 'Python Eğitimi', student_label: 'Ezgi', instructor_name: 'Deniz Hoca', date: sd(5), start: '14:00', end: '16:00' }
+r = await as('anon', `select public.shared_create($1, '55555555-2222-4333-8444-555555555555') res`, [base])
+const sh = r.rows?.[0]?.res
+ok('girişsiz kullanıcı ortak derse ders ekler', sh?.created === 1, r.error?.message)
+r = await as('anon', `select public.shared_create($1, '55555555-2222-4333-8444-555555555555') res`, [base])
+r = await db.query(`select count(*)::int n from public.shared_lessons`)
+ok('aynı ekleme isteği çift ders oluşturmaz', r.rows[0].n === 1)
+r = await as('anon', `select count(*)::int n from public.shared_lessons`)
+ok('ortak tabloya doğrudan erişim yok (yalnızca RPC)', !!r.error)
+r = await as('anon', `select count(*)::int n from public.students`)
+ok('girişsiz kullanıcı öğrenci tablosunu hâlâ göremez', !!r.error || r.rows[0].n === 0)
+r = await as('anon', `select count(*)::int n from public.payments`)
+ok('girişsiz kullanıcı ödemeleri hâlâ göremez', !!r.error || r.rows[0].n === 0)
+r = await as('anon', `select public.shared_create($1) res`, [{ ...base, student_label: 'Mert', start: '15:00', end: '16:00' }])
+ok('aynı eğitmen aynı saatte iki derse konamaz', !!r.error && /Çakışma: Deniz Hoca/.test(r.error.message), r.error?.message)
+r = await as('anon', `select public.shared_create($1) res`, [{ ...base, course_name: '  ', student_label: 'X' }])
+ok('boş kurs adı reddedilir', !!r.error)
+r = await as('anon', `select x from public.shared_list(now(), now() + interval '30 days') x`)
+const sl = r.rows?.[0]?.x
+ok('ortak program listelenir (iç alanlar gizli)', sl?.course_name === 'Python Eğitimi' && !('request_id' in sl), JSON.stringify(sl))
+r = await as('anon', `select public.shared_update($1, $2, $3) x`, [sl.id, sl.version, { start: '17:00', end: '18:30' }])
+ok('ders saati değiştirilir', r.rows?.[0]?.x?.version === sl.version + 1, r.error?.message)
+r = await as('anon', `select public.shared_update($1, $2, $3) x`, [sl.id, sl.version, { start: '09:00' }])
+ok('eski sürümle değişiklik reddedilir (eşzamanlı düzenleme koruması)', !!r.error && /başka bir telefonda/.test(r.error.message), r.error?.message)
+let cur = (await db.query(`select version, starts_at from public.shared_lessons where id=$1`, [sl.id])).rows[0]
+r = await as('anon', `select public.shared_postpone($1, $2, $3::date, '10:00', '11:30', 'ogrenci', 'Sınav') x`, [sl.id, cur.version, sd(8)])
+const newSh = r.rows?.[0]?.x?.new_id
+ok('ders ertelenir (yeni tarihli ders oluşur)', !!newSh, r.error?.message)
+r = await db.query(`select status, status_reason from public.shared_lessons where id=$1`, [sl.id])
+ok('eski kayıt "ertelendi" + gerekçe ile korunur', r.rows[0].status === 'ertelendi' && /Öğrenci talebi: Sınav/.test(r.rows[0].status_reason), JSON.stringify(r.rows[0]))
+r = await db.query(`select title, body from public.push_deliveries where shared_lesson_id=$1 and kind='pub_time'`, [newSh])
+ok('erteleme bildirimi: "Ders Ertelendi – … yeni tarih ve saate ertelendi: …"', r.rows.length >= 1 && /Ders Ertelendi/.test(r.rows[0].title) && /yeni tarih ve saate ertelendi: .* 10\.00\./.test(r.rows[0].body), JSON.stringify(r.rows))
+r = await as('anon', `select public.shared_postpone($1, null, $2::date, '10:00', '11:30', 'ogrenci') x`, [sl.id, sd(9)])
+ok('aynı ders ikinci kez ertelenemez', !!r.error && /zaten ertelendi/.test(r.error.message))
+cur = (await db.query(`select version from public.shared_lessons where id=$1`, [newSh])).rows[0]
+r = await as('anon', `select public.shared_cancel($1, $2, 'Hastalık') x`, [newSh, cur.version])
+ok('ders iptal edilir', r.rows?.[0]?.x?.status === 'iptal', r.error?.message)
+r = await db.query(`select title, body from public.push_deliveries where shared_lesson_id=$1 and kind='pub_cancel'`, [newSh])
+ok('iptal bildirimi: "Planlanan Python Eğitimi iptal edildi."', r.rows.length >= 1 && /^Planlanan Python Eğitimi iptal edildi\./.test(r.rows[0].body), JSON.stringify(r.rows))
+cur = (await db.query(`select version from public.shared_lessons where id=$1`, [newSh])).rows[0]
+r = await as('anon', `select public.shared_restore($1, $2) x`, [newSh, cur.version])
+ok('iptal geri alınır', r.rows?.[0]?.x?.status === 'planlandi', r.error?.message)
+r = await as('anon', `select public.shared_create($1) res`, [{ ...base, instructor_name: 'Selin Hoca', student_label: 'Zeynep', date: sd(-1), start: '10:00', end: '11:00' }])
+const pastSh = r.rows?.[0]?.res?.first_id
+cur = (await db.query(`select version from public.shared_lessons where id=$1`, [pastSh])).rows[0]
+r = await as('anon', `select public.shared_complete($1, $2, 'katilmadi') x`, [pastSh, cur.version])
+ok('ders tamamlanır + yoklama "Öğrenci gelmedi"', r.rows?.[0]?.x?.status === 'tamamlandi' && r.rows[0].x.attendance === 'katilmadi', r.error?.message)
+r = await as('anon', `select public.shared_complete($1, null, 'katilmadi') x`, [pastSh])
+r = await db.query(`select count(*)::int n from public.shared_lesson_events where lesson_id=$1 and action in ('tamamlandi','yoklama_degisti')`, [pastSh])
+ok('aynı tamamlama tekrarlanınca çift kayıt oluşmaz', r.rows[0].n === 1, String(r.rows[0].n))
+r = await db.query(`select count(*)::int n from public.push_deliveries where shared_lesson_id=$1 and kind='pub_done'`, [pastSh])
+ok('tamamlandı bildirimi tek', r.rows[0].n === 1, String(r.rows[0].n))
+r = await as('anon', `select public.shared_complete($1, null, 'katildi') x`, [newSh])
+ok('henüz başlamamış ders tamamlanamaz', !!r.error)
+cur = (await db.query(`select version from public.shared_lessons where id=$1`, [newSh])).rows[0]
+r = await as('anon', `select public.shared_delete($1, $2) x`, [newSh, cur.version])
+r = await as('anon', `select count(*)::int n from public.shared_list(now(), now() + interval '30 days') x where x->>'id' = $1`, [newSh])
+ok('silinen ders listeden kalkar', r.rows?.[0]?.n === 0, r.error?.message)
+r = await as('anon', `select public.shared_undelete($1) x`, [newSh])
+ok('silme geri alınır', r.rows?.[0]?.x?.id === newSh, r.error?.message)
+r = await as('anon', `select x from public.shared_get($1) x`, [sl.id])
+ok('işlem geçmişinde eski tarih ve erteleme görünür', (r.rows?.[0]?.x?.history ?? []).some((h) => h.action === 'ertelendi') && r.rows[0].x.moved_to?.id === newSh, r.error?.message)
+r = await as('anon', `select public.shared_create($1) res`, [{ ...base, instructor_name: 'Ali Hoca', date: sd(10), start: '12:00', end: '13:00', repeat_until: sd(31) }])
+ok('haftalık tekrarlayan ortak ders (4 hafta)', r.rows?.[0]?.res?.created === 4, r.error?.message ?? JSON.stringify(r.rows?.[0]))
+// zamanlı bildirimler
+const shAt = async (s, e, ins) => (await db.query(`insert into public.shared_lessons (course_name, instructor_name, starts_at, ends_at) values ('Robotik Kodlama', $3, $1, $2) returning id`, [s, e, ins])).rows[0].id
+const s15 = await shAt(at(14.5), at(74.5), 'A1'), sSt = await shAt(at(-1), at(59), 'A2'), sE15 = await shAt(at(-45), at(14.5), 'A3'), sEnd = await shAt(at(-61), at(-1), 'A4')
+await db.query(`select private.enqueue_shared_reminders()`)
+const shKinds = async (id) => (await db.query(`select kind, title, body from public.push_deliveries where shared_lesson_id=$1`, [id])).rows
+ok('ortak ders: 15 dk önce bildirimi', (await shKinds(s15)).some((x) => x.kind === 'lesson_15' && /Ders Başlamak Üzere/.test(x.title)))
+ok('ortak ders: ders saati geldi bildirimi', (await shKinds(sSt)).some((x) => x.kind === 'lesson_start'))
+ok("ortak ders: bitişe 15 dk kala (Robotik Kodlama'nın)", (await shKinds(sE15)).some((x) => x.kind === 'lesson_end15' && /^Robotik Kodlama'nın bitmesine/.test(x.body)))
+ok('ortak ders: süre doldu bildirimi, ders otomatik tamamlanmaz', (await shKinds(sEnd)).some((x) => x.kind === 'lesson_end') && (await db.query(`select status from public.shared_lessons where id=$1`, [sEnd])).rows[0].status === 'planlandi')
+await db.query(`select private.enqueue_shared_reminders()`)
+r = await db.query(`select count(*)::int n from public.push_deliveries where shared_lesson_id = any($1::uuid[])`, [[s15, sSt, sE15, sEnd]])
+const shCount = r.rows[0].n
+await db.query(`select private.enqueue_shared_reminders()`)
+r = await db.query(`select count(*)::int n from public.push_deliveries where shared_lesson_id = any($1::uuid[])`, [[s15, sSt, sE15, sEnd]])
+ok('ortak derste aynı bildirim iki kez kuyruğa girmez', r.rows[0].n === shCount)
+r = await as('anon', `select public.set_public_push_prefs('https://push.example/pub', '{"lesson_15": false, "kotu": "x"}'::jsonb)`)
+r = await db.query(`select prefs from public.push_subscriptions where endpoint='https://push.example/pub'`)
+ok('girişsiz cihaz bildirim tercihini kaydeder (bilinmeyen anahtar atılır)', r.rows[0]?.prefs?.lesson_15 === false && !('kotu' in (r.rows[0]?.prefs ?? {})), JSON.stringify(r.rows))
+// hız sınırı (en sonda; aynı istemciden 60 yazma / 10 dk)
+let limited = false
+for (let i = 0; i < 70 && !limited; i++) {
+  r = await as('anon', `select public.shared_create($1) res`, [{ course_name: 'Spam', date: sd(40 + (i % 20)), start: `${String(8 + Math.floor(i / 20)).padStart(2, '0')}:00`, end: `${String(8 + Math.floor(i / 20)).padStart(2, '0')}:30` }])
+  if (r.error && /Çok fazla işlem/.test(r.error.message)) limited = true
+}
+ok('girişsiz yazmada hız sınırı çalışır', limited)
+
 console.log(`\nSonuç: ${pass} başarılı, ${fail} başarısız`)
 process.exit(fail ? 1 : 0)
