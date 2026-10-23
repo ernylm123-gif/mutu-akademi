@@ -191,7 +191,7 @@ export function SharedLessonSheet({ lesson, onClose, onEdit, onChanged, onDelete
           <div className="flex gap-2">{back}<Button variant="danger" block loading={busy} onClick={() => void (async () => {
             if (busy) return
             setBusy(true); setError(null)
-            try { await shared.remove(l); onDeleted(l); onChanged(); onClose() } catch (e) { setError(errorMessage(e)); onChanged() } finally { setBusy(false) }
+            try { await shared.remove(l); onDeleted(l); onClose() } catch (e) { setError(errorMessage(e)); onChanged() } finally { setBusy(false) }
           })()}>Sil</Button></div>
         </div>
       )}

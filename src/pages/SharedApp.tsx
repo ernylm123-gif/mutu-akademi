@@ -105,7 +105,7 @@ function LessonCard({ l, onOpen, showDate }: { l: SharedLesson; onOpen: (l: Shar
   const st = sharedStatus(l)
   const faded = l.status === 'iptal' || l.status === 'ertelendi'
   return (
-    <button onClick={() => onOpen(l)} className="card flex w-full items-center gap-3 p-3.5 text-left active:scale-[.99]">
+    <button data-testid="lesson-card" data-lesson-id={l.id} onClick={() => onOpen(l)} className="card flex w-full items-center gap-3 p-3.5 text-left active:scale-[.99]">
       <span className="h-12 w-1.5 shrink-0 rounded-full" style={{ background: TONE_COLOR[st.tone] }} />
       <span className="w-14 shrink-0">
         <span className="block text-base font-bold tabular-nums">{timeHM(l.starts_at)}</span>
@@ -230,7 +230,7 @@ export function SharedApp() {
 
       <SharedLessonSheet lesson={selected} onClose={() => setSelected(null)} onChanged={reloadSelected}
         onEdit={(l) => { setSelected(null); setEditing(l); setFormOpen(true) }}
-        onDeleted={(l) => setUndo(l)} onOpen={openById} />
+        onDeleted={(l) => { setSelected(null); setUndo(l); refresh() }} onOpen={openById} />
       <SharedLessonForm open={formOpen} onClose={() => setFormOpen(false)} editing={editing} defaultDate={formDate} suggestions={suggestions}
         onSaved={() => refresh()} />
       <NotificationPrompt mode="public" />
