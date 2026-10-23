@@ -18,6 +18,7 @@ export interface SharedLesson {
   ends_at: string
   status: SharedStatus
   attendance: SharedAttendance | null
+  group_attendance: Record<string, SharedAttendance> | null
   started_at: string | null
   completed_at: string | null
   status_reason: string | null
@@ -50,6 +51,24 @@ export interface SharedInput {
   repeat_until?: string
 }
 
+export type SeriesScope = 'this' | 'following' | 'all'
+
+export interface ImportRow {
+  course_name: string
+  student_label: string | null
+  instructor_name: string | null
+  room: string | null
+  title: string | null
+  date: string
+  start: string
+  end: string
+  repeat_until?: string | null
+}
+export interface ImportCheck { row: number; count: number; conflicts?: number; duplicates?: number; messages?: string[]; error?: string }
+
+/** Grup dersi öğrenci adları ("Ezgi, Mert, Doğa") */
+export const groupNames = (label: string | null) => (label ?? '').split(/[,;\n]+/).map((x) => x.trim()).filter(Boolean).slice(0, 30)
+
 export function requestId(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID()
   return 'xxxxxxxx-xxxx-4xxx-8xxx-xxxxxxxxxxxx'.replace(/x/g, () => Math.floor(Math.random() * 16).toString(16))
@@ -68,13 +87,20 @@ export const shared = {
   get: (id: string) => call<SharedDetail | null>('shared_get', { p_id: id }),
   events: (limit = 30) => call<SharedEvent[]>('shared_events', { p_limit: limit }),
   create: (p: SharedInput, reqId: string) => call<{ created: number; first_id: string }>('shared_create', { p, p_request_id: reqId }),
-  update: (l: Pick<SharedLesson, 'id' | 'version'>, p: Partial<SharedInput>) => call<SharedLesson>('shared_update', { p_id: l.id, p_version: l.version, p }),
+  update: (l: Pick<SharedLesson, 'id' | 'version'>, p: Partial<SharedInput>, scope: SeriesScope = 'this') =>
+    call<SharedLesson & { updated: number }>('shared_update', { p_id: l.id, p_version: l.version, p, p_scope: scope }),
+  removeSeries: (l: Pick<SharedLesson, 'id' | 'version'>, scope: 'following' | 'all') =>
+    call<{ deleted: number; ids: string[] }>('shared_delete_series', { p_id: l.id, p_version: l.version, p_scope: scope }),
+  undeleteMany: (ids: string[]) => call<{ restored: number }>('shared_undelete_many', { p_ids: ids }),
+  checkImport: (rows: ImportRow[]) => call<ImportCheck[]>('shared_check_import', { p_rows: rows }),
+  importRows: (rows: ImportRow[], reqId: string) => call<{ created: number; skipped: number; duplicate?: boolean }>('shared_import', { p_rows: rows, p_request_id: reqId }),
   postpone: (l: Pick<SharedLesson, 'id' | 'version'>, date: string, start: string, end: string, reason: string, note: string) =>
     call<{ new_id: string }>('shared_postpone', { p_id: l.id, p_version: l.version, p_date: date, p_start: start, p_end: end, p_reason: reason, p_note: note || null }),
   cancel: (l: Pick<SharedLesson, 'id' | 'version'>, reason: string) => call<SharedLesson>('shared_cancel', { p_id: l.id, p_version: l.version, p_reason: reason || null }),
   restore: (l: Pick<SharedLesson, 'id' | 'version'>) => call<SharedLesson>('shared_restore', { p_id: l.id, p_version: l.version }),
   start: (l: Pick<SharedLesson, 'id' | 'version'>) => call<SharedLesson>('shared_start', { p_id: l.id, p_version: l.version }),
-  complete: (l: Pick<SharedLesson, 'id' | 'version'>, attendance: SharedAttendance) => call<SharedLesson>('shared_complete', { p_id: l.id, p_version: l.version, p_attendance: attendance }),
+  complete: (l: Pick<SharedLesson, 'id' | 'version'>, attendance: SharedAttendance, group?: Record<string, SharedAttendance> | null) =>
+    call<SharedLesson>('shared_complete', { p_id: l.id, p_version: l.version, p_attendance: attendance, p_group: group ?? null }),
   reopen: (l: Pick<SharedLesson, 'id' | 'version'>) => call<SharedLesson>('shared_reopen', { p_id: l.id, p_version: l.version }),
   remove: (l: Pick<SharedLesson, 'id' | 'version'>) => call<{ deleted: string }>('shared_delete', { p_id: l.id, p_version: l.version }),
   undelete: (id: string) => call<SharedLesson>('shared_undelete', { p_id: id }),
@@ -85,5 +111,5 @@ export const shared = {
 export const ACTION_TEXT: Record<string, string> = {
   olusturuldu: 'Ders eklendi', duzenlendi: 'Ders düzenlendi', saat_degisti: 'Ders saati değişti', ertelendi: 'Ders ertelendi',
   iptal: 'Ders iptal edildi', iptal_geri_alindi: 'İptal geri alındı', basladi: 'Ders başladı', tamamlandi: 'Ders tamamlandı',
-  yoklama_degisti: 'Yoklama güncellendi', tamamlama_geri_alindi: 'Tamamlama geri alındı', silindi: 'Ders silindi', silme_geri_alindi: 'Silme geri alındı',
+  yoklama_degisti: 'Yoklama güncellendi', ice_aktarildi: 'Program içe aktarıldı', tamamlama_geri_alindi: 'Tamamlama geri alındı', silindi: 'Ders silindi', silme_geri_alindi: 'Silme geri alındı',
 }

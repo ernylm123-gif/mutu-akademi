@@ -49,7 +49,8 @@ function Protected() {
   const location = useLocation()
   const wantsAdmin = location.pathname.startsWith('/yonetim')
 
-  // Açılış ASLA oturum beklemez: yetkili olmayan / henüz doğrulanmamış her cihaz anında ortak programı görür.
+  // Tek arayüz: ana adres herkese (yetkili cihazlar dahil) aynı ortak ders panelini açar; oturum beklenmez.
+  if (location.pathname === '/' && !linkKey) return <SharedApp />
   if (authorized) {
     // yetkili cihaz: tam yönetim uygulaması (aşağıda)
   } else if (linkKey) {
@@ -67,6 +68,7 @@ function Protected() {
       <Routes>
         <Route element={<AppShell />}>
           <Route index element={<DashboardPage />} />
+          <Route path="yonetim" element={<DashboardPage />} />
           <Route path="takvim" element={<CalendarPage />} />
           <Route path="dersler" element={<LessonsPage />} />
           <Route path="ogrenciler" element={<StudentsPage />} />

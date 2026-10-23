@@ -4,7 +4,7 @@ import { Play, CheckCheck, CalendarClock, Ban, Undo2, Pencil, Trash2, Users, Use
 import { dateKey, formatDayLong, formatDayShort, fromIstanbul, relativeTime, timeHM } from '@/lib/time'
 import { ATTENDANCE_ORDER, ATTENDANCE_STATUS, POSTPONE_REASON, displayStatus, TONE_COLOR } from '@/lib/format'
 import { errorMessage } from '@/lib/errors'
-import { shared, ACTION_TEXT, type SharedAttendance, type SharedDetail, type SharedLesson } from '@/lib/sharedApi'
+import { shared, groupNames, ACTION_TEXT, type SharedAttendance, type SharedDetail, type SharedLesson } from '@/lib/sharedApi'
 import { Badge, Button, Field, Input, Select, Sheet, Textarea } from '@/components/ui'
 import { useToast } from '@/components/ui/Toast'
 
@@ -19,7 +19,7 @@ export function SharedLessonSheet({ lesson, onClose, onEdit, onChanged, onDelete
   onClose: () => void
   onEdit: (l: SharedLesson) => void
   onChanged: () => void
-  onDeleted: (l: SharedLesson) => void
+  onDeleted: (l: SharedLesson, ids: string[]) => void
   onOpen: (id: string) => void
 }) {
   const toast = useToast()
@@ -33,11 +33,13 @@ export function SharedLessonSheet({ lesson, onClose, onEdit, onChanged, onDelete
   const [end, setEnd] = useState('')
   const [reason, setReason] = useState('ogrenci')
   const [text, setText] = useState('')
+  const [groupAtt, setGroupAtt] = useState<Record<string, SharedAttendance>>({})
 
   useEffect(() => {
     if (!lesson) return
     setMode('view'); setError(null); setText(''); setReason('ogrenci')
     setAtt(lesson.attendance ?? 'katildi')
+    setGroupAtt(Object.fromEntries(groupNames(lesson.student_label).map((n) => [n, lesson.group_attendance?.[n] ?? 'katildi'])))
     setDate(dateKey(lesson.starts_at)); setStart(timeHM(lesson.starts_at)); setEnd(timeHM(lesson.ends_at))
   }, [lesson?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -51,6 +53,16 @@ export function SharedLessonSheet({ lesson, onClose, onEdit, onChanged, onDelete
   if (!lesson) return null
   const l = lesson
   const st = sharedStatus(l)
+  const names = groupNames(l.student_label)
+  const isGroup = l.is_group && names.length > 1
+  const del = async (scope: 'this' | 'following' | 'all') => {
+    if (busy) return
+    setBusy(true); setError(null)
+    try {
+      const ids = scope === 'this' ? (await shared.remove(l), [l.id]) : (await shared.removeSeries(l, scope)).ids
+      onDeleted(l, ids); onChanged(); onClose()
+    } catch (e) { setError(errorMessage(e)); onChanged() } finally { setBusy(false) }
+  }
   const notYet = new Date(l.starts_at).getTime() > Date.now() + 3600_000
   const run = async (fn: () => Promise<unknown>, ok: string, close = true) => {
     if (busy) return
@@ -84,7 +96,10 @@ export function SharedLessonSheet({ lesson, onClose, onEdit, onChanged, onDelete
           </div>
           <div className="flex flex-wrap gap-2">
             <Badge tone={st.tone}>{st.label}</Badge>
-            {l.attendance && l.status === 'tamamlandi' && <Badge tone={ATTENDANCE_STATUS[l.attendance].tone}>Yoklama: {ATTENDANCE_STATUS[l.attendance].label}</Badge>}
+            {l.attendance && l.status === 'tamamlandi' && !l.group_attendance && <Badge tone={ATTENDANCE_STATUS[l.attendance].tone}>Yoklama: {ATTENDANCE_STATUS[l.attendance].label}</Badge>}
+            {l.status === 'tamamlandi' && l.group_attendance && Object.entries(l.group_attendance).map(([n, s]) => (
+              <Badge key={n} tone={ATTENDANCE_STATUS[s].tone}>{n}: {s === 'katilmadi' ? 'Gelmedi' : ATTENDANCE_STATUS[s].label}</Badge>
+            ))}
             {l.series_id && <Badge tone="brand">Haftalık tekrar</Badge>}
           </div>
           <div className="grid gap-2 text-sm">
@@ -144,15 +159,30 @@ export function SharedLessonSheet({ lesson, onClose, onEdit, onChanged, onDelete
       {mode === 'complete' && (
         <div className="space-y-4">
           <p className="text-sm text-slate-500">Ders saati dolsa bile otomatik tamamlanmaz. Yoklama sonucunu seçip onaylayın; aynı işlem iki kez kaydedilmez.</p>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-            {ATTENDANCE_ORDER.map((s) => (
-              <button key={s} type="button" aria-pressed={att === s} onClick={() => setAtt(s)}
-                className={clsx('h-12 rounded-xl text-sm font-semibold', att === s ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-700')}>
-                {s === 'katilmadi' ? 'Öğrenci gelmedi' : ATTENDANCE_STATUS[s].label}
-              </button>
-            ))}
-          </div>
-          <div className="flex gap-2">{back}<Button block loading={busy} onClick={() => void run(() => shared.complete(l, att), 'Ders tamamlandı olarak kaydedildi')}>Kaydet</Button></div>
+          {isGroup ? names.map((n) => (
+            <div key={n}>
+              <p className="mb-1.5 text-sm font-semibold">{n}</p>
+              <div className="grid grid-cols-3 gap-1.5">
+                {(['katildi', 'katilmadi', 'izinli'] as SharedAttendance[]).map((s) => (
+                  <button key={s} type="button" aria-pressed={groupAtt[n] === s} aria-label={`${n}: ${s === 'katilmadi' ? 'Gelmedi' : ATTENDANCE_STATUS[s].label}`}
+                    onClick={() => setGroupAtt((g) => ({ ...g, [n]: s }))}
+                    className={clsx('h-11 rounded-xl text-sm font-semibold', groupAtt[n] === s ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-700')}>
+                    {s === 'katilmadi' ? 'Gelmedi' : ATTENDANCE_STATUS[s].label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )) : (
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              {ATTENDANCE_ORDER.map((s) => (
+                <button key={s} type="button" aria-pressed={att === s} onClick={() => setAtt(s)}
+                  className={clsx('h-12 rounded-xl text-sm font-semibold', att === s ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-700')}>
+                  {s === 'katilmadi' ? 'Öğrenci gelmedi' : ATTENDANCE_STATUS[s].label}
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="flex gap-2">{back}<Button block loading={busy} onClick={() => void run(() => shared.complete(l, att, isGroup ? groupAtt : null), 'Ders tamamlandı olarak kaydedildi')}>Kaydet</Button></div>
         </div>
       )}
 
@@ -188,11 +218,16 @@ export function SharedLessonSheet({ lesson, onClose, onEdit, onChanged, onDelete
         <div className="space-y-4">
           <p className="text-sm text-slate-600"><b>{l.course_name}</b> – {formatDayLong(dateKey(l.starts_at))} {timeHM(l.starts_at)} programdan kaldırılsın mı?</p>
           <p className="text-sm text-slate-500">Silinen ders işlem geçmişinde kalır ve hemen ardından "Geri al" ile geri getirilebilir. Ders yapılmayacaksa "İptal et" daha uygundur.</p>
-          <div className="flex gap-2">{back}<Button variant="danger" block loading={busy} onClick={() => void (async () => {
-            if (busy) return
-            setBusy(true); setError(null)
-            try { await shared.remove(l); onDeleted(l); onChanged(); onClose() } catch (e) { setError(errorMessage(e)); onChanged() } finally { setBusy(false) }
-          })()}>Sil</Button></div>
+          {l.series_id ? (
+            <div className="grid gap-2">
+              <Button variant="danger" block loading={busy} onClick={() => void del('this')}>Yalnızca bu dersi sil</Button>
+              <Button variant="secondary" block className="text-red-600" disabled={busy} onClick={() => void del('following')}>Bu ve sonraki dersleri sil</Button>
+              <Button variant="secondary" block className="text-red-600" disabled={busy} onClick={() => void del('all')}>Tüm seriyi sil</Button>
+              {back}
+            </div>
+          ) : (
+            <div className="flex gap-2">{back}<Button variant="danger" block loading={busy} onClick={() => void del('this')}>Sil</Button></div>
+          )}
         </div>
       )}
     </Sheet>

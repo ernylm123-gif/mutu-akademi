@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
 import clsx from 'clsx'
 import {
   Home, CalendarDays, BookOpenCheck, Bell, Menu as MenuIcon, Plus, Radio, WifiOff, ChevronLeft, ChevronRight, RefreshCw,
-  BellRing, Send, Lock, Smartphone, ShieldCheck, Search, Activity, Megaphone, Info,
+  BellRing, Send, Lock, Smartphone, Search, Activity, Megaphone, Info, Upload, Download,
 } from 'lucide-react'
 import { publicClient } from '@/lib/publicClient'
 import {
@@ -19,6 +18,7 @@ import { NotificationPrompt } from '@/components/NotificationPrompt'
 import { usePush } from '@/hooks/usePush'
 import { SharedLessonForm } from '@/components/shared/SharedLessonForm'
 import { SharedLessonSheet, sharedStatus } from '@/components/shared/SharedLessonSheet'
+import { ImportSheet, ExportSheet } from '@/components/shared/SharedImportExport'
 
 type Tab = 'ana' | 'takvim' | 'dersler' | 'bildirimler' | 'menu'
 type Live = 'connecting' | 'live' | 'offline'
@@ -105,7 +105,7 @@ function LessonCard({ l, onOpen, showDate }: { l: SharedLesson; onOpen: (l: Shar
   const st = sharedStatus(l)
   const faded = l.status === 'iptal' || l.status === 'ertelendi'
   return (
-    <button onClick={() => onOpen(l)} className="card flex w-full items-center gap-3 p-3.5 text-left active:scale-[.99]">
+    <button data-testid="ders-kart" onClick={() => onOpen(l)} className="card flex w-full items-center gap-3 p-3.5 text-left active:scale-[.99]">
       <span className="h-12 w-1.5 shrink-0 rounded-full" style={{ background: TONE_COLOR[st.tone] }} />
       <span className="w-14 shrink-0">
         <span className="block text-base font-bold tabular-nums">{timeHM(l.starts_at)}</span>
@@ -129,7 +129,9 @@ export function SharedApp() {
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState<SharedLesson | null>(null)
   const [formDate, setFormDate] = useState<string | undefined>(undefined)
-  const [undo, setUndo] = useState<SharedLesson | null>(null)
+  const [undo, setUndo] = useState<{ l: SharedLesson; ids: string[] } | null>(null)
+  const [importOpen, setImportOpen] = useState(false)
+  const [exportRange, setExportRange] = useState<[string, string] | null>(null)
 
   // Öneriler ve Ana Sayfa için yakın dönem (son 31 gün – gelecek 31 gün)
   const near = useShared(addDays(today, -31), addDays(today, 31), tick)
@@ -147,7 +149,8 @@ export function SharedApp() {
   }, [near.data]) // eslint-disable-line react-hooks/exhaustive-deps
   const reloadSelected = useCallback(() => {
     refresh()
-    if (selected) shared.get(selected.id).then((d) => d && setSelected(d)).catch(() => undefined)
+    // Yalnızca aynı ders hâlâ açıksa güncelle (kapatılan/silinen ders yeniden açılmasın)
+    if (selected) shared.get(selected.id).then((d) => d && setSelected((cur) => (cur?.id === d.id ? d : cur))).catch(() => undefined)
   }, [selected]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Bildirime dokununca: /?ders=<id>
@@ -194,10 +197,10 @@ export function SharedApp() {
 
       <main className="pb-nav mx-auto max-w-3xl px-4 pt-4">
         {tab === 'ana' && <HomeTab data={near.data} error={near.error} onOpen={setSelected} onAdd={() => openNew()} onRetry={refresh} tick={tick} />}
-        {tab === 'takvim' && <CalendarTab tick={tick} onOpen={setSelected} onAdd={openNew} />}
+        {tab === 'takvim' && <CalendarTab tick={tick} onOpen={setSelected} onAdd={openNew} onExport={(f, t) => setExportRange([f, t])} onImport={() => setImportOpen(true)} />}
         {tab === 'dersler' && <LessonsTab tick={tick} onOpen={setSelected} />}
         {tab === 'bildirimler' && <NotificationsTab tick={tick} onOpenId={openById} />}
-        {tab === 'menu' && <MenuTab />}
+        {tab === 'menu' && <MenuTab onImport={() => setImportOpen(true)} onExport={() => setExportRange([startOfWeek(today), addDays(startOfWeek(today), 35)])} />}
       </main>
 
       <button onClick={() => openNew(tab === 'ana' ? undefined : undefined)} aria-label="Ders ekle"
@@ -209,13 +212,16 @@ export function SharedApp() {
       {undo && (
         <div className="fixed inset-x-4 z-40 mx-auto flex max-w-md items-center gap-3 rounded-2xl bg-slate-900 px-4 py-3 text-sm text-white shadow-xl"
           style={{ bottom: 'calc(9.5rem + env(safe-area-inset-bottom))' }} role="status">
-          <span className="flex-1">"{undo.course_name}" silindi.</span>
+          <span className="flex-1">"{undo.l.course_name}"{undo.ids.length > 1 ? ` (${undo.ids.length} ders)` : ''} silindi.</span>
           <button className="min-h-11 px-2 font-bold text-cyan-300" onClick={() => {
-            const l = undo; setUndo(null)
-            shared.undelete(l.id).then(() => { toast.success('Ders geri getirildi'); refresh() }).catch((e) => toast.error(errorMessage(e)))
+            const u = undo; setUndo(null)
+            const p = u.ids.length > 1 ? shared.undeleteMany(u.ids) : shared.undelete(u.l.id)
+            p.then(() => { toast.success('Ders geri getirildi'); refresh() }).catch((e) => toast.error(errorMessage(e)))
           }}>Geri al</button>
         </div>
       )}
+      <ImportSheet open={importOpen} onClose={() => setImportOpen(false)} onDone={refresh} />
+      <ExportSheet open={!!exportRange} onClose={() => setExportRange(null)} from={exportRange?.[0] ?? today} to={exportRange?.[1] ?? addDays(today, 7)} />
 
       <nav className="safe-bottom fixed inset-x-0 bottom-0 z-30 border-t border-slate-200/70 bg-white/95 backdrop-blur-xl">
         <div className="mx-auto grid max-w-3xl grid-cols-5">
@@ -230,7 +236,7 @@ export function SharedApp() {
 
       <SharedLessonSheet lesson={selected} onClose={() => setSelected(null)} onChanged={reloadSelected}
         onEdit={(l) => { setSelected(null); setEditing(l); setFormOpen(true) }}
-        onDeleted={(l) => setUndo(l)} onOpen={openById} />
+        onDeleted={(l, ids) => setUndo({ l, ids })} onOpen={openById} />
       <SharedLessonForm open={formOpen} onClose={() => setFormOpen(false)} editing={editing} defaultDate={formDate} suggestions={suggestions}
         onSaved={() => refresh()} />
       <NotificationPrompt mode="public" />
@@ -318,7 +324,9 @@ function EventRow({ e, onOpen }: { e: SharedEvent; onOpen?: (id: string) => void
 
 // ---------------------------------------------------------------------------
 type CalView = 'gun' | 'hafta' | 'ay'
-function CalendarTab({ tick, onOpen, onAdd }: { tick: number; onOpen: (l: SharedLesson) => void; onAdd: (date?: string) => void }) {
+function CalendarTab({ tick, onOpen, onAdd, onExport, onImport }: {
+  tick: number; onOpen: (l: SharedLesson) => void; onAdd: (date?: string) => void; onExport: (from: string, to: string) => void; onImport: () => void
+}) {
   const today = dateKey()
   const [view, setView] = useState<CalView>('gun')
   const [cursor, setCursor] = useState(today)
@@ -333,7 +341,13 @@ function CalendarTab({ tick, onOpen, onAdd }: { tick: number; onOpen: (l: Shared
   const title = view === 'gun' ? formatDayLong(cursor) : view === 'hafta' ? `${formatDayShort(from)} – ${formatDayShort(addDays(from, 6))}` : `${MONTHS[Number(cursor.slice(5, 7)) - 1]} ${cursor.slice(0, 4)}`
   return (
     <div>
-      <h1 className="text-2xl font-extrabold tracking-tight">Takvim</h1>
+      <div className="flex items-center justify-between gap-2">
+        <h1 className="text-2xl font-extrabold tracking-tight">Takvim</h1>
+        <div className="flex gap-1.5">
+          <Button size="sm" variant="secondary" icon={<Upload className="size-4" />} onClick={onImport}>Yükle</Button>
+          <Button size="sm" variant="secondary" icon={<Download className="size-4" />} onClick={() => onExport(from, to)}>Dışa aktar</Button>
+        </div>
+      </div>
       <p className="text-sm text-slate-500">{title}</p>
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <Segmented value={view} onChange={setView} options={[{ value: 'gun', label: 'Gün' }, { value: 'hafta', label: 'Hafta' }, { value: 'ay', label: 'Ay' }]} />
@@ -494,7 +508,7 @@ function NotificationsTab({ tick, onOpenId }: { tick: number; onOpenId: (id: str
 }
 
 // ---------------------------------------------------------------------------
-function MenuTab() {
+function MenuTab({ onImport, onExport }: { onImport: () => void; onExport: () => void }) {
   const ios = /iPhone|iPad|iPod/.test(navigator.userAgent)
   return (
     <div>
@@ -511,11 +525,18 @@ function MenuTab() {
         <p className="mt-2">Bu bağlantıyı açan herkes dersleri görebilir ve değiştirebilir. Kimlik doğrulaması olmadığı için kötü niyetli birinin değişiklik yapması tamamen engellenemez; bunu azaltmak için her işlem kaydedilir, silinen dersler geri alınabilir ve işlem sayısı sınırlıdır.</p>
         <p className="mt-2">Bu alana telefon, veli, ödeme veya sağlık bilgisi yazmayın. Öğrenci kayıtları ve ödemeler ayrı, korumalı yönetim alanında tutulur.</p>
       </Card>
-      <Link to="/yonetim" className="card mt-3 flex min-h-16 items-center gap-3 p-4">
-        <ShieldCheck className="size-5 text-slate-500" />
-        <span className="flex-1 text-sm"><b className="block">Yetkili yönetim alanı</b><span className="text-slate-500">Öğrenci kayıtları, ders hakları ve ödemeler (yalnızca yetkili cihazlar)</span></span>
-        <ChevronRight className="size-4 text-slate-300" />
-      </Link>
+      <div className="mt-3 grid gap-2">
+        <button onClick={onImport} className="card flex min-h-16 items-center gap-3 p-4 text-left">
+          <Upload className="size-5 text-brand-600" />
+          <span className="flex-1 text-sm"><b className="block">Program yükle</b><span className="text-slate-500">Excel (.xlsx) veya CSV, önizlemeli</span></span>
+          <ChevronRight className="size-4 text-slate-300" />
+        </button>
+        <button onClick={onExport} className="card flex min-h-16 items-center gap-3 p-4 text-left">
+          <Download className="size-5 text-brand-600" />
+          <span className="flex-1 text-sm"><b className="block">Programı dışa aktar</b><span className="text-slate-500">Bu ve gelecek 4 hafta · PDF, Excel, CSV</span></span>
+          <ChevronRight className="size-4 text-slate-300" />
+        </button>
+      </div>
       <p className="mt-6 text-center text-xs text-slate-400">MUTU AKADEMİ · sürüm {__APP_VERSION__}</p>
     </div>
   )

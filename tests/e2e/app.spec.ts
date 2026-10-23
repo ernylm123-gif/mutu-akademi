@@ -39,8 +39,9 @@ test.describe('herkese açık sayfalar', () => {
   })
 
   test('ortak programda telefon veya ödeme bilgisi bulunmaz', async ({ page }) => {
-    await page.goto('/?gorunum=hafta')
-    await page.getByRole('button', { name: 'Hafta' }).click()
+    await page.goto('/')
+    await page.getByRole('button', { name: 'Takvim', exact: true }).click()
+    await page.getByRole('button', { name: 'Hafta', exact: true }).click()
     await page.waitForTimeout(2000)
     const text = await page.locator('main').innerText()
     expect(text).not.toMatch(/0\s?5\d{2}[\s-]?\d{3}|₺|veli/i)

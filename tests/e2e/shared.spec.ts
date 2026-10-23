@@ -18,7 +18,14 @@ async function openApp(page: Page) {
 
 const dlg = (page: Page, name: string) => page.getByRole('dialog').last().getByRole('button', { name, exact: true })
 const toast = (page: Page, re: RegExp) => page.getByRole('status').filter({ hasText: re }).first()
-const card = (page: Page, text: string) => page.getByRole('button').filter({ hasText: text }).first()
+// Açık ders kartı/sayfası varsa kapat (kaydet sonrası sayfa açık kalır)
+async function closeSheets(page: Page) {
+  for (let i = 0; i < 3 && (await page.getByRole('dialog').count()) > 0; i++) {
+    await page.keyboard.press('Escape')
+    await page.waitForTimeout(400)
+  }
+}
+const card = (page: Page, text: string) => page.getByTestId('ders-kart').filter({ hasText: text }).first()
 
 test('ortak alan: ekle, düzenle, başlat, tamamla, ertele, iptal/geri al, sil/geri al – iki telefonda canlı', async ({ browser }) => {
   test.setTimeout(180_000)
@@ -49,7 +56,7 @@ test('ortak alan: ekle, düzenle, başlat, tamamla, ertele, iptal/geri al, sil/g
   await expect(card(b, course)).toBeVisible({ timeout: 15_000 })
 
   // 2) Düzenle (öğrenci kısa adı)
-  await card(a, course).click()
+  await closeSheets(a); await card(a, course).click()
   await dlg(a, 'Düzenle').click()
   await a.getByLabel(/^Öğrenci/).fill('Test2')
   await dlg(a, 'Kaydet').click()
@@ -57,7 +64,7 @@ test('ortak alan: ekle, düzenle, başlat, tamamla, ertele, iptal/geri al, sil/g
   await expect(card(b, course)).toContainText('Test2', { timeout: 15_000 })
 
   // 3) Dersi başlat → B'de "Devam ediyor"
-  await card(a, course).click()
+  await closeSheets(a); await card(a, course).click()
   await dlg(a, 'Dersi başlat').click()
   await expect(toast(a, /Ders başladı/)).toBeVisible({ timeout: 15_000 })
   await expect(card(b, course)).toContainText('Devam ediyor', { timeout: 15_000 })
@@ -68,14 +75,12 @@ test('ortak alan: ekle, düzenle, başlat, tamamla, ertele, iptal/geri al, sil/g
   await dlg(a, 'Kaydet').click()
   await expect(toast(a, /tamamlandı olarak kaydedildi/)).toBeVisible({ timeout: 15_000 })
   await expect(card(b, course)).toContainText('Öğrenci gelmedi', { timeout: 15_000 })
-  await card(a, course).click()
+  await closeSheets(a); await card(a, course).click()
   await dlg(a, 'Tamamlamayı geri al').click()
   await expect(toast(a, /Tamamlama geri alındı/)).toBeVisible({ timeout: 15_000 })
-  await a.getByRole('button', { name: 'Kapat' }).click().catch(() => undefined)
-  await a.keyboard.press('Escape').catch(() => undefined)
 
   // 5) Ertele (neden + yeni tarih/saat) → eski kayıt "Ertelendi"
-  await card(a, course).click()
+  await closeSheets(a); await card(a, course).click()
   await dlg(a, 'Ertele').click()
   await a.getByLabel('Erteleme nedeni').selectOption('egitmen')
   const tomorrow = new Date(Date.now() + 86400000).toLocaleDateString('sv-SE', { timeZone: 'Europe/Istanbul' })
@@ -87,7 +92,7 @@ test('ortak alan: ekle, düzenle, başlat, tamamla, ertele, iptal/geri al, sil/g
   await expect(card(b, course)).toContainText('Ertelendi', { timeout: 15_000 })
 
   // 6) Yeni tarihli dersi aç → iptal et → iptali geri al
-  await card(a, course).click()
+  await closeSheets(a); await card(a, course).click()
   await a.getByRole('button', { name: /Yeni tarih:/ }).click()
   await expect(a.getByText('16:00 – 17:00')).toBeVisible({ timeout: 15_000 })
   await dlg(a, 'İptal et').click()
@@ -95,16 +100,16 @@ test('ortak alan: ekle, düzenle, başlat, tamamla, ertele, iptal/geri al, sil/g
   await dlg(a, 'İptal et').click()
   await expect(toast(a, /^Ders iptal edildi$/)).toBeVisible({ timeout: 15_000 })
   // B: Dersler sekmesinde yeni tarih "İptal edildi"
-  await b.getByRole('button', { name: 'Dersler' }).click()
+  await b.getByRole('button', { name: 'Dersler', exact: true }).click()
   await expect(card(b, course).filter({ hasText: 'İptal edildi' })).toBeVisible({ timeout: 15_000 })
-  await a.getByRole('button', { name: 'Dersler' }).click()
-  await card(a, course).filter({ hasText: 'İptal edildi' }).click()
+  await closeSheets(a); await a.getByRole('button', { name: 'Dersler', exact: true }).click()
+  await closeSheets(a); await card(a, course).filter({ hasText: 'İptal edildi' }).click()
   await dlg(a, 'İptali geri al').click()
   await expect(toast(a, /İptal geri alındı/)).toBeVisible({ timeout: 15_000 })
   await expect(card(b, course).filter({ hasText: 'Planlandı' })).toBeVisible({ timeout: 15_000 })
 
   // 7) Sil → onay → "Geri al" → tekrar sil (temizlik)
-  await card(a, course).filter({ hasText: 'Planlandı' }).click()
+  await closeSheets(a); await card(a, course).filter({ hasText: 'Planlandı' }).click()
   await dlg(a, 'Sil').click()
   await dlg(a, 'Sil').click()
   await expect(toast(a, /silindi\./)).toBeVisible({ timeout: 15_000 })
@@ -112,12 +117,12 @@ test('ortak alan: ekle, düzenle, başlat, tamamla, ertele, iptal/geri al, sil/g
   await a.getByRole('button', { name: 'Geri al', exact: true }).click()
   await expect(toast(a, /Ders geri getirildi/)).toBeVisible({ timeout: 15_000 })
   await expect(card(b, course).filter({ hasText: 'Planlandı' })).toBeVisible({ timeout: 15_000 })
-  await card(a, course).filter({ hasText: 'Planlandı' }).click()
+  await closeSheets(a); await card(a, course).filter({ hasText: 'Planlandı' }).click()
   await dlg(a, 'Sil').click()
   await dlg(a, 'Sil').click()
   // eski (ertelenen) kaydı da sil
-  await a.getByRole('button', { name: 'Ana Sayfa' }).click()
-  await card(a, course).click()
+  await closeSheets(a); await a.getByRole('button', { name: 'Ana Sayfa', exact: true }).click()
+  await closeSheets(a); await card(a, course).click()
   await dlg(a, 'Sil').click()
   await dlg(a, 'Sil').click()
   await expect(card(b, course)).toHaveCount(0, { timeout: 15_000 })

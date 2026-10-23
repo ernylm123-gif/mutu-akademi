@@ -3,8 +3,8 @@ import clsx from 'clsx'
 import { ShieldAlert } from 'lucide-react'
 import { addMonths, dateKey, timeHM } from '@/lib/time'
 import { errorMessage } from '@/lib/errors'
-import { shared, requestId, type SharedInput, type SharedLesson } from '@/lib/sharedApi'
-import { Button, Field, Input, Sheet, Textarea, Toggle } from '@/components/ui'
+import { shared, requestId, type SeriesScope, type SharedInput, type SharedLesson } from '@/lib/sharedApi'
+import { Button, Field, Input, Segmented, Sheet, Textarea, Toggle } from '@/components/ui'
 import { useToast } from '@/components/ui/Toast'
 
 const DURATIONS = [45, 60, 90, 120]
@@ -26,10 +26,11 @@ export function SharedLessonForm({ open, onClose, editing, defaultDate, suggesti
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const reqId = useRef(requestId())
+  const [scope, setScope] = useState<SeriesScope>('this')
 
   useEffect(() => {
     if (!open) return
-    setError(null); setDirty(false); reqId.current = requestId()
+    setError(null); setDirty(false); reqId.current = requestId(); setScope('this')
     if (editing) {
       setV({
         course_name: editing.course_name, student_label: editing.student_label ?? '', instructor_name: editing.instructor_name ?? '',
@@ -53,8 +54,8 @@ export function SharedLessonForm({ open, onClose, editing, defaultDate, suggesti
         ...(v.repeat && !editing ? { repeat_until: v.repeat_until } : {}),
       }
       if (editing) {
-        await shared.update(editing, p)
-        toast.success('Ders güncellendi; tüm telefonlarda görünür')
+        const r = await shared.update(editing, p, scope)
+        toast.success(r.updated > 1 ? `${r.updated} ders güncellendi; tüm telefonlarda görünür` : 'Ders güncellendi; tüm telefonlarda görünür')
         onSaved(editing.id)
       } else {
         const r = await shared.create(p, reqId.current)
@@ -83,13 +84,20 @@ export function SharedLessonForm({ open, onClose, editing, defaultDate, suggesti
         </div>
       }>
       <form className="grid gap-4" onSubmit={(e) => { e.preventDefault(); void save() }} noValidate>
+        {editing?.series_id && (
+          <div>
+            <p className="mb-1.5 text-sm font-semibold">Hangi dersler değişsin?</p>
+            <Segmented value={scope} onChange={setScope} options={[{ value: 'this', label: 'Yalnızca bu' }, { value: 'following', label: 'Bu ve sonrakiler' }, { value: 'all', label: 'Tüm seri' }]} />
+            {scope !== 'this' && <p className="mt-1.5 text-xs text-slate-500">Saat ve bilgiler serideki planlı derslere uygulanır; tarihler ve geçmiş/tamamlanan dersler değişmez.</p>}
+          </div>
+        )}
         <Field label="Ders / kurs adı *">
           <Input list="dl-kurs" value={v.course_name} maxLength={80} onChange={(e) => set({ course_name: e.target.value })} placeholder="Ör. Python Eğitimi" autoComplete="off" />
         </Field>
         <Field label={v.is_group ? 'Öğrenciler (kısa ad / takma ad)' : 'Öğrenci (kısa ad / takma ad)'} hint="Soyad, telefon veya kişisel bilgi yazmayın; herkes görebilir.">
           <Input list="dl-ogrenci" value={v.student_label} maxLength={80} onChange={(e) => set({ student_label: e.target.value })} placeholder={v.is_group ? 'Ör. Ezgi, Mert, Doğa' : 'Ör. Ezgi K.'} autoComplete="off" />
         </Field>
-        <Field label="Eğitmen">
+        <Field label="Eğitmen" hint="Listede yoksa yeni adı yazmanız yeterli; sonraki derslerde önerilir.">
           <Input list="dl-egitmen" value={v.instructor_name} maxLength={80} onChange={(e) => set({ instructor_name: e.target.value })} placeholder="Ör. Deniz Hoca" autoComplete="off" />
         </Field>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">

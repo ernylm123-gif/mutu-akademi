@@ -630,6 +630,47 @@ ok('ortak derste aynı bildirim iki kez kuyruğa girmez', r.rows[0].n === shCoun
 r = await as('anon', `select public.set_public_push_prefs('https://push.example/pub', '{"lesson_15": false, "kotu": "x"}'::jsonb)`)
 r = await db.query(`select prefs from public.push_subscriptions where endpoint='https://push.example/pub'`)
 ok('girişsiz cihaz bildirim tercihini kaydeder (bilinmeyen anahtar atılır)', r.rows[0]?.prefs?.lesson_15 === false && !('kotu' in (r.rows[0]?.prefs ?? {})), JSON.stringify(r.rows))
+// grup yoklaması, seri düzenleme/silme, içe aktarma
+await db.query(`delete from private.shared_writes`)
+r = await as('anon', `select public.shared_create($1) res`, [{ course_name: 'Grup Robotik', student_label: 'Ezgi, Mert', is_group: true, instructor_name: 'Grup Hoca', date: sd(-1), start: '09:00', end: '10:00' }])
+const grpSh = r.rows?.[0]?.res?.first_id
+r = await as('anon', `select public.shared_complete($1, null, 'katildi', $2::jsonb) x`, [grpSh, JSON.stringify({ Ezgi: 'katildi', Mert: 'izinli' })])
+ok('grup dersinde öğrenci başına yoklama kaydedilir', r.rows?.[0]?.x?.group_attendance?.Mert === 'izinli' && r.rows[0].x.group_attendance.Ezgi === 'katildi', r.error?.message)
+r = await as('anon', `select public.shared_complete($1, null, 'katildi', '{"X":"uydurma"}'::jsonb) x`, [grpSh])
+ok('geçersiz grup yoklaması reddedilir', !!r.error)
+r = await as('anon', `select public.shared_create($1) res`, [{ course_name: 'Seri Python', instructor_name: 'Seri Hoca', date: sd(14), start: '10:00', end: '11:00', repeat_until: sd(42) }])
+ok('seri oluşturulur (5 hafta)', r.rows?.[0]?.res?.created === 5, r.error?.message ?? JSON.stringify(r.rows?.[0]))
+const serFirst = r.rows?.[0]?.res?.first_id
+r = await db.query(`select id, version from public.shared_lessons where series_id=(select series_id from public.shared_lessons where id=$1) order by starts_at offset 2 limit 1`, [serFirst])
+const serMid = r.rows[0]
+r = await as('anon', `select public.shared_update($1, $2, $3, 'following') x`, [serMid.id, serMid.version, { start: '12:00', end: '13:30' }])
+ok('"bu ve sonraki dersler" seri düzenlemesi', r.rows?.[0]?.x?.updated === 3, r.error?.message ?? JSON.stringify(r.rows?.[0]?.x))
+r = await db.query(`select to_char(starts_at at time zone 'Europe/Istanbul','HH24:MI') t from public.shared_lessons where series_id=(select series_id from public.shared_lessons where id=$1) order by starts_at`, [serFirst])
+ok('önceki seri dersleri değişmez, sonrakiler yeni saatte', r.rows.map((x) => x.t).join(',') === '10:00,10:00,12:00,12:00,12:00', r.rows.map((x) => x.t).join(','))
+r = await db.query(`select version from public.shared_lessons where id=$1`, [serFirst])
+r = await as('anon', `select public.shared_update($1, $2, $3, 'all') x`, [serFirst, r.rows[0].version, { room: 'Lab 1' }])
+r = await db.query(`select count(*)::int n from public.shared_lessons where series_id=(select series_id from public.shared_lessons where id=$1) and room='Lab 1'`, [serFirst])
+ok('tüm seri düzenlenir', r.rows[0].n === 5, String(r.rows[0].n))
+r = await db.query(`select version from public.shared_lessons where id=$1`, [serMid.id])
+r = await as('anon', `select public.shared_delete_series($1, $2, 'following') x`, [serMid.id, r.rows[0].version])
+const delIds = r.rows?.[0]?.x?.ids ?? []
+ok('seri silinir (bu ve sonrakiler)', r.rows?.[0]?.x?.deleted === 3, r.error?.message)
+r = await as('anon', `select public.shared_undelete_many($1::uuid[]) x`, [delIds])
+ok('seri silme geri alınır', r.rows?.[0]?.x?.restored === 3, r.error?.message)
+const impRows = [
+  { course_name: 'İçe Aktarma', student_label: 'Doğa', instructor_name: 'Imp Hoca', date: sd(20), start: '09:00', end: '10:00' },
+  { course_name: 'İçe Aktarma 2', instructor_name: 'Imp Hoca', date: sd(20), start: '09:30', end: '10:30' },
+  { course_name: '', date: sd(20), start: '09:00', end: '10:00' },
+]
+r = await as('anon', `select public.shared_check_import($1) x`, [JSON.stringify(impRows)])
+const chk = r.rows?.[0]?.x ?? []
+ok('içe aktarma ön kontrolü: hatalı satır işaretlenir', chk.length === 3 && !!chk[2].error && chk[0].count === 1, r.error?.message ?? JSON.stringify(chk))
+r = await as('anon', `select public.shared_import($1, '66666666-2222-4333-8444-555555555555') x`, [JSON.stringify(impRows)])
+ok('içe aktarma: çakışan satır atlanır', r.rows?.[0]?.x?.created === 1 && r.rows[0].x.skipped >= 1, r.error?.message ?? JSON.stringify(r.rows?.[0]?.x))
+r = await as('anon', `select public.shared_import($1, '66666666-2222-4333-8444-555555555555') x`, [JSON.stringify(impRows)])
+ok('aynı içe aktarma iki kez uygulanmaz', r.rows?.[0]?.x?.duplicate === true)
+await db.query(`delete from private.shared_writes`)
+
 // hız sınırı (en sonda; aynı istemciden 60 yazma / 10 dk)
 let limited = false
 for (let i = 0; i < 70 && !limited; i++) {
