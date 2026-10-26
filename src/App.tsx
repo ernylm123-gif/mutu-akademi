@@ -50,7 +50,7 @@ function Protected() {
   const wantsAdmin = location.pathname.startsWith('/yonetim')
 
   // Tek arayüz: ana adres herkese (yetkili cihazlar dahil) aynı ortak ders panelini açar; oturum beklenmez.
-  if (location.pathname === '/' && !linkKey) return <SharedApp />
+  if (location.pathname === '/' && (!linkKey || authorized)) return <SharedApp />
   if (authorized) {
     // yetkili cihaz: tam yönetim uygulaması (aşağıda)
   } else if (linkKey) {
