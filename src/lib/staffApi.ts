@@ -1,24 +1,24 @@
-// Yetkili cihaz işlemleri: korumalı öğrenci/eğitmen kayıtları ve sunucuda hesaplanan istatistikler.
-// Tüm çağrılar oturumlu istemciyle yapılır; sunucu yetkiyi her çağrıda doğrular (RLS + require_staff).
-import { supabase } from '@/lib/supabase'
+// Ortak çalışma alanı: öğrenci/eğitmen yönetimi ve sunucuda hesaplanan istatistikler (girişsiz, tek arayüz).
+// Bu alanda yalnızca hassas olmayan veri vardır (ad, kurs, ders hakkı, program); telefon/veli/ödeme yoktur.
+// Tüm yazmalar sunucudaki doğrulamalı RPC'lerden geçer (hız sınırı, işlem geçmişi, sürüm kontrolü).
+import { publicClient } from '@/lib/publicClient'
 import { downloadCsv, saveOrShare } from '@/lib/csv'
 import { downloadPdf } from '@/lib/pdf'
-import type { SharedAttendance, SharedInput, SharedLesson, SeriesScope } from '@/lib/sharedApi'
+import { shared, type SharedAttendance, type SharedInput, type SharedLesson, type SeriesScope } from '@/lib/sharedApi'
+
+export interface WeeklyItem { weekday: number; start: string; duration: number }
 
 export interface StaffStudent {
   id: string
   full_name: string
   public_label: string
-  phone: string | null
-  guardian_name: string | null
-  guardian_phone: string | null
   registered_at: string
   course_names: string[]
   instructor_ids: string[]
   package_name: string | null
   total_lessons: number
   default_duration: number
-  notes: string | null
+  weekly: WeeklyItem[]
   is_active: boolean
   version: number
 }
@@ -27,19 +27,18 @@ export interface StaffInstructor {
   id: string
   full_name: string
   public_label: string
-  phone: string | null
   specialty: string | null
   course_names: string[]
-  notes: string | null
+  work_days: number[]
+  work_start: string | null
+  work_end: string | null
   is_active: boolean
   version: number
 }
 
-export interface Availability { id: string; instructor_id: string; weekday: number; start_time: string; end_time: string }
-export interface WeeklySlot { id: string; student_id: string; instructor_id: string | null; weekday: number; start_time: string; duration_minutes: number; is_active: boolean }
-export interface Package { id: string; student_id: string; kind: 'paket' | 'duzeltme'; name: string; lesson_count: number; purchased_at: string; note: string | null; is_void: boolean; created_at: string }
+export interface Package { id: string; student_id: string; kind: 'paket' | 'duzeltme'; name: string; lesson_count: number; note: string | null; is_void: boolean; created_at: string }
 
-export interface StaffLesson extends SharedLesson { student_ids: string[]; instructor_id: string | null; student_att: Record<string, SharedAttendance> | null; my_att?: SharedAttendance | null }
+export interface StaffLesson extends SharedLesson { my_att?: SharedAttendance | null }
 
 export interface Period {
   planned: number; completed: number; attended: number; absent: number; excused: number; late: number; early: number
@@ -61,7 +60,7 @@ export interface InstructorStats {
   history: (InstructorPeriod & { month: string })[]
   lessons: StaffLesson[]
 }
-export interface Overview { id: string; purchased: number; used: number; remaining: number; next_at: string | null; month_min: number; month_attended: number }
+export interface Overview { id: string; purchased: number; used: number; remaining: number; next_at: string | null; month_min: number }
 export interface Dashboard {
   active_students: number; instructors: number; today: number; today_completed: number; upcoming: number
   month_taught_min: number; month_completed: number; month_postponed: number; needs_attendance: number
@@ -78,73 +77,61 @@ export type StaffInput = SharedInput & { student_ids: string[]; instructor_id: s
 async function rpc<T>(fn: string, args: Record<string, unknown>): Promise<T> {
   if (typeof navigator !== 'undefined' && !navigator.onLine) throw new Error('İnternet bağlantısı yok. Değişiklik KAYDEDİLMEDİ.')
   const timeout = new Promise<never>((_, rej) => setTimeout(() => rej(new Error('Sunucu yanıt vermedi. Lütfen tekrar deneyin.')), 20_000))
-  const res = await Promise.race([supabase.rpc(fn, args), timeout])
+  const res = await Promise.race([publicClient.rpc(fn, args), timeout])
   if (res.error) throw res.error
   return res.data as T
 }
 
-async function rows<T>(p: PromiseLike<{ data: T | null; error: unknown }>): Promise<T> {
-  const { data, error } = await p
-  if (error) throw error
-  return data as T
-}
+type RawStudent = { id: string; name: string; courses: string[]; instructor_ids: string[]; package_name: string | null; default_duration: number; registered_at: string
+  weekly: WeeklyItem[]; is_active: boolean; version: number; purchased: number; used: number; remaining: number; next_at: string | null; month_min: number | null }
+type RawInstructor = { id: string; name: string; specialty: string | null; courses: string[]; work_days: number[]; work_start: string | null; work_end: string | null; is_active: boolean; version: number }
 
-const STUDENT_COLS = 'id, full_name, public_label, phone, guardian_name, guardian_phone, registered_at, course_names, instructor_ids, package_name, total_lessons, default_duration, notes, is_active, version'
-const INSTRUCTOR_COLS = 'id, full_name, public_label, phone, specialty, course_names, notes, is_active, version'
+const toStudent = (s: RawStudent): StaffStudent => ({
+  id: s.id, full_name: s.name, public_label: s.name, registered_at: s.registered_at, course_names: s.courses ?? [], instructor_ids: s.instructor_ids ?? [],
+  package_name: s.package_name, total_lessons: s.purchased ?? 0, default_duration: s.default_duration, weekly: s.weekly ?? [], is_active: s.is_active, version: s.version,
+})
+const toInstructor = (i: RawInstructor): StaffInstructor => ({
+  id: i.id, full_name: i.name, public_label: i.name, specialty: i.specialty, course_names: i.courses ?? [], work_days: i.work_days ?? [],
+  work_start: i.work_start?.slice(0, 5) ?? null, work_end: i.work_end?.slice(0, 5) ?? null, is_active: i.is_active, version: i.version,
+})
+
+export interface StudentInput {
+  name: string; courses: string[]; instructor_ids: string[]; package_name: string | null; default_duration: number; registered_at: string
+  weekly: WeeklyItem[]; is_active: boolean; total_credits: number
+}
+export interface InstructorInput { name: string; specialty: string | null; courses: string[]; work_days: number[]; work_start: string | null; work_end: string | null; is_active: boolean }
 
 export const staff = {
-  students: () => rows<StaffStudent[]>(supabase.from('students').select(STUDENT_COLS).order('full_name')),
-  instructors: () => rows<StaffInstructor[]>(supabase.from('instructors').select(INSTRUCTOR_COLS).order('full_name')),
-  availability: (iid?: string) => {
-    const q = supabase.from('instructor_availability').select('*').order('weekday')
-    return rows<Availability[]>(iid ? q.eq('instructor_id', iid) : q)
-  },
-  weekly: (sid: string) => rows<WeeklySlot[]>(supabase.from('weekly_schedules').select('*').eq('student_id', sid).order('weekday')),
-  packages: (sid: string) => rows<Package[]>(supabase.from('lesson_packages').select('*').eq('student_id', sid).order('created_at', { ascending: false })),
-
-  saveStudent: async (v: Partial<StaffStudent>, existing?: StaffStudent | null) => {
-    if (existing) {
-      const { version: _v, id: _i, ...patch } = v
-      const { data, error } = await supabase.from('students').update(patch).eq('id', existing.id).eq('version', existing.version).select(STUDENT_COLS).maybeSingle()
-      if (error) throw error
-      if (!data) throw new Error('Bu kayıt başka bir cihazda değiştirildi. Kapatıp yeniden açın ve tekrar deneyin.')
-      return data as unknown as StaffStudent
+  directory: async () => {
+    const d = await rpc<{ students: RawStudent[]; instructors: RawInstructor[] }>('ws_directory', {})
+    return {
+      students: d.students.map(toStudent),
+      instructors: d.instructors.map(toInstructor),
+      overview: d.students.map((s): Overview => ({ id: s.id, purchased: s.purchased, used: s.used, remaining: s.remaining, next_at: s.next_at, month_min: s.month_min ?? 0 })),
     }
-    return rows<StaffStudent>(supabase.from('students').insert(v).select(STUDENT_COLS).single())
   },
-  saveInstructor: async (v: Partial<StaffInstructor>, existing?: StaffInstructor | null) => {
-    if (existing) {
-      const { version: _v, id: _i, ...patch } = v
-      const { data, error } = await supabase.from('instructors').update(patch).eq('id', existing.id).eq('version', existing.version).select(INSTRUCTOR_COLS).maybeSingle()
-      if (error) throw error
-      if (!data) throw new Error('Bu kayıt başka bir cihazda değiştirildi. Kapatıp yeniden açın ve tekrar deneyin.')
-      return data as unknown as StaffInstructor
-    }
-    return rows<StaffInstructor>(supabase.from('instructors').insert(v).select(INSTRUCTOR_COLS).single())
-  },
-  setAvailability: (iid: string, days: number[], start: string | null, end: string | null) =>
-    rpc<null>('staff_set_availability', { p_iid: iid, p_days: days, p_start: start, p_end: end }),
-  setWeekly: async (sid: string, slots: { weekday: number; start_time: string; duration_minutes: number; instructor_id: string | null }[]) => {
-    await rows(supabase.from('weekly_schedules').delete().eq('student_id', sid))
-    if (slots.length) await rows(supabase.from('weekly_schedules').insert(slots.map((s) => ({ ...s, student_id: sid }))))
-  },
-  addPackage: (sid: string, name: string, count: number, note: string, kind: 'paket' | 'duzeltme' = 'paket') =>
-    rows(supabase.from('lesson_packages').insert({ student_id: sid, name, lesson_count: count, note: note || null, kind })),
-  voidPackage: (id: string, reason: string) =>
-    rows(supabase.from('lesson_packages').update({ is_void: true, void_reason: reason || 'İptal', voided_at: new Date().toISOString() }).eq('id', id)),
+  packages: (sid: string) => rpc<Package[]>('ws_packages_of', { p_sid: sid }),
+  saveStudent: async (v: StudentInput, existing?: StaffStudent | null) =>
+    toStudent(await rpc<RawStudent>('ws_save_student', { p: v, p_id: existing?.id ?? null, p_version: existing?.version ?? null })),
+  saveInstructor: async (v: InstructorInput, existing?: StaffInstructor | null) =>
+    toInstructor(await rpc<RawInstructor>('ws_save_instructor', { p: v, p_id: existing?.id ?? null, p_version: existing?.version ?? null })),
+  addPackage: (sid: string, name: string, count: number, note: string) => rpc('ws_add_package', { p_sid: sid, p_name: name, p_count: count, p_note: note || null }),
+  voidPackage: (id: string) => rpc('ws_void_package', { p_id: id }),
 
-  create: (p: StaffInput, reqId: string) => rpc<{ created: number; first_id: string; duplicate?: boolean }>('staff_create', { p, p_request_id: reqId }),
+  create: (p: StaffInput, reqId: string) => rpc<{ created: number; first_id: string; duplicate?: boolean }>('ws_create', { p, p_request_id: reqId }),
   update: (l: Pick<SharedLesson, 'id' | 'version'>, p: Partial<StaffInput>, scope: SeriesScope = 'this') =>
-    rpc<SharedLesson & { updated: number }>('staff_update', { p_id: l.id, p_version: l.version, p, p_scope: scope }),
+    rpc<SharedLesson & { updated: number }>('ws_update', { p_id: l.id, p_version: l.version, p, p_scope: scope }),
   complete: (l: Pick<SharedLesson, 'id' | 'version'>, att: Record<string, SharedAttendance>) =>
-    rpc<SharedLesson>('staff_complete', { p_id: l.id, p_version: l.version, p_att: att }),
-  links: (ids: string[]) => rpc<{ id: string; student_ids: string[] | null; instructor_id: string | null; student_att: Record<string, SharedAttendance> | null }[]>('staff_links', { p_ids: ids }),
-  studentStats: (sid: string, month?: string) => rpc<StudentStats>('staff_student_stats', { p_sid: sid, p_month: month ?? null }),
-  instructorStats: (iid: string, month?: string) => rpc<InstructorStats>('staff_instructor_stats', { p_iid: iid, p_month: month ?? null }),
-  overview: () => rpc<Overview[]>('staff_students_overview', {}),
-  dashboard: () => rpc<Dashboard>('staff_dashboard', {}),
+    rpc<SharedLesson>('ws_complete', { p_id: l.id, p_version: l.version, p_att: att }),
+  links: async (ids: string[]) => {
+    const d = ids[0] ? await shared.get(ids[0]) : null
+    return d ? [{ id: d.id, student_ids: d.ws_student_ids ?? [], instructor_id: d.ws_instructor_id ?? null, student_att: d.ws_att ?? null }] : []
+  },
+  studentStats: (sid: string, month?: string) => rpc<StudentStats>('ws_student_stats', { p_sid: sid, p_month: month ?? null }),
+  instructorStats: (iid: string, month?: string) => rpc<InstructorStats>('ws_instructor_stats', { p_iid: iid, p_month: month ?? null }),
+  dashboard: () => rpc<Dashboard>('ws_dashboard', {}),
   report: (from: string, to: string, f: { student?: string | null; instructor?: string | null; course?: string | null } = {}) =>
-    rpc<ReportRow[]>('staff_report', { p_from: from, p_to: to, p_student: f.student ?? null, p_instructor: f.instructor ?? null, p_course: f.course ?? null }),
+    rpc<ReportRow[]>('ws_report', { p_from: from, p_to: to, p_student: f.student ?? null, p_instructor: f.instructor ?? null, p_course: f.course ?? null }),
 }
 
 /** "18 sa 30 dk" – dakikayı saat ve dakika olarak doğru gösterir */

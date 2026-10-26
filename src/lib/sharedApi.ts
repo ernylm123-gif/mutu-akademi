@@ -19,6 +19,9 @@ export interface SharedLesson {
   status: SharedStatus
   attendance: SharedAttendance | null
   group_attendance: Record<string, SharedAttendance> | null
+  ws_student_ids?: string[] | null
+  ws_instructor_id?: string | null
+  ws_att?: Record<string, SharedAttendance> | null
   started_at: string | null
   completed_at: string | null
   status_reason: string | null
@@ -111,5 +114,5 @@ export const shared = {
 export const ACTION_TEXT: Record<string, string> = {
   olusturuldu: 'Ders eklendi', duzenlendi: 'Ders düzenlendi', saat_degisti: 'Ders saati değişti', ertelendi: 'Ders ertelendi',
   iptal: 'Ders iptal edildi', iptal_geri_alindi: 'İptal geri alındı', basladi: 'Ders başladı', tamamlandi: 'Ders tamamlandı',
-  yoklama_degisti: 'Yoklama güncellendi', ice_aktarildi: 'Program içe aktarıldı', tamamlama_geri_alindi: 'Tamamlama geri alındı', silindi: 'Ders silindi', silme_geri_alindi: 'Silme geri alındı',
+  yoklama_degisti: 'Yoklama güncellendi', ice_aktarildi: 'Program içe aktarıldı', ogrenci_eklendi: 'Öğrenci eklendi', ogrenci_guncellendi: 'Öğrenci güncellendi', egitmen_eklendi: 'Eğitmen eklendi', egitmen_guncellendi: 'Eğitmen güncellendi', tamamlama_geri_alindi: 'Tamamlama geri alındı', silindi: 'Ders silindi', silme_geri_alindi: 'Silme geri alındı',
 }

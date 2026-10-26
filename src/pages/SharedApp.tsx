@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import clsx from 'clsx'
 import {
   Home, CalendarDays, BookOpenCheck, Bell, Menu as MenuIcon, Plus, Radio, WifiOff, ChevronLeft, ChevronRight, RefreshCw,
-  BellRing, Send, Lock, Smartphone, Search, Activity, Megaphone, Info, Upload, Download, Users, GraduationCap, History, ClipboardCheck, BarChart3, Settings, ShieldCheck,
+  BellRing, Send, Smartphone, Search, Activity, Megaphone, Info, Upload, Download, Users, GraduationCap, ClipboardCheck, BarChart3, Settings, ShieldCheck,
 } from 'lucide-react'
 import { publicClient } from '@/lib/publicClient'
 import {
@@ -19,15 +19,14 @@ import { usePush } from '@/hooks/usePush'
 import { SharedLessonForm } from '@/components/shared/SharedLessonForm'
 import { SharedLessonSheet, sharedStatus } from '@/components/shared/SharedLessonSheet'
 import { ImportSheet, ExportSheet } from '@/components/shared/SharedImportExport'
-import { useAuth } from '@/hooks/useAuth'
 import {
-  useStaffData, StaffLock, StaffDashboard, StudentsScreen, StudentProfile, InstructorsScreen, InstructorProfile, ReportsScreen, AttendanceScreen, type Screen,
+  useStaffData, StaffDashboard, StudentsScreen, StudentProfile, InstructorsScreen, InstructorProfile, ReportsScreen, AttendanceScreen, type Screen,
 } from '@/components/staff/StaffViews'
 import { StudentFormSheet, InstructorFormSheet } from '@/components/staff/StaffForms'
 
 type AppScreen = Screen | { kind: 'ayarlar' }
 
-type Tab = 'ana' | 'takvim' | 'dersler' | 'bildirimler' | 'menu'
+type Tab = 'ana' | 'takvim' | 'dersler' | 'ogrenciler' | 'bildirimler' | 'menu'
 type Live = 'connecting' | 'live' | 'offline'
 type Announcement = { id: string; title: string; body: string; created_at: string }
 
@@ -35,7 +34,7 @@ const TABS: { id: Tab; label: string; icon: typeof Home }[] = [
   { id: 'ana', label: 'Ana Sayfa', icon: Home },
   { id: 'takvim', label: 'Takvim', icon: CalendarDays },
   { id: 'dersler', label: 'Dersler', icon: BookOpenCheck },
-  { id: 'bildirimler', label: 'Bildirimler', icon: Bell },
+  { id: 'ogrenciler', label: 'Öğrenciler', icon: Users },
   { id: 'menu', label: 'Menü', icon: MenuIcon },
 ]
 
@@ -144,8 +143,8 @@ export function SharedApp() {
   const [quickAdd, setQuickAdd] = useState<'ogrenci' | 'egitmen' | null>(null)
 
   // Yetkili cihaz: korumalı öğrenci/eğitmen modülleri aynı arayüzde açılır
-  const { profile } = useAuth()
-  const isStaff = !!profile?.approved && !!profile.is_active && (profile.role === 'admin' || profile.role === 'personel')
+  // Öğrenci/eğitmen yönetimi herkese açık ortak çalışma alanındadır (hassas veri yok)
+  const isStaff = true
   const sdata = useStaffData(isStaff, tick)
   const staffCtx = isStaff && sdata.students && sdata.instructors ? { students: sdata.students, instructors: sdata.instructors, reload: sdata.reload } : null
 
@@ -205,8 +204,7 @@ export function SharedApp() {
   const openStudent = (id: string) => nav({ kind: 'ogrenci', id })
 
   const renderScreen = (s: AppScreen) => {
-    if (s.kind === 'ayarlar') return <SettingsScreen onBack={goBack} isStaff={isStaff} onImport={() => setImportOpen(true)} onExport={() => setExportRange([startOfWeek(today), addDays(startOfWeek(today), 35)])} />
-    if (!isStaff) return <div><BackTitle title={SCREEN_TITLE[s.kind]} onBack={goBack} /><StaffLock /></div>
+    if (s.kind === 'ayarlar') return <SettingsScreen onBack={goBack} onImport={() => setImportOpen(true)} onExport={() => setExportRange([startOfWeek(today), addDays(startOfWeek(today), 35)])} />
     switch (s.kind) {
       case 'ogrenciler': return <StudentsScreen data={sdata} onNav={nav} onBack={goBack} />
       case 'ogrenci': return <StudentProfile key={s.id} id={s.id} data={sdata} tick={tick} onBack={goBack} onOpenLesson={openById} onAddLesson={(sid) => openNew(undefined, sid)} />
@@ -243,8 +241,9 @@ export function SharedApp() {
               staffSlot={isStaff ? <StaffDashboard tick={tick} onNav={nav} onAddStudent={() => setQuickAdd('ogrenci')} onAddInstructor={() => setQuickAdd('egitmen')} onAddLesson={() => openNew()} onImport={() => setImportOpen(true)} /> : null} />}
             {tab === 'takvim' && <CalendarTab tick={tick} onOpen={setSelected} onAdd={openNew} onExport={(f, t) => setExportRange([f, t])} onImport={() => setImportOpen(true)} />}
             {tab === 'dersler' && <LessonsTab key={lessonsWhich} initial={lessonsWhich} tick={tick} onOpen={setSelected} />}
+            {tab === 'ogrenciler' && <StudentsScreen data={sdata} onNav={nav} />}
             {tab === 'bildirimler' && <NotificationsTab tick={tick} onOpenId={openById} />}
-            {tab === 'menu' && <MenuTab isStaff={isStaff} onNav={nav}
+            {tab === 'menu' && <MenuTab onNav={nav}
               onTab={(t, which) => { if (which) setLessonsWhich(which); goTab(t) }} />}
           </>
         )}
@@ -565,9 +564,6 @@ function NotificationsTab({ tick, onOpenId }: { tick: number; onOpenId: (id: str
 }
 
 // ---------------------------------------------------------------------------
-const SCREEN_TITLE: Record<Screen['kind'], string> = {
-  ogrenciler: 'Öğrenciler', ogrenci: 'Öğrenci', egitmenler: 'Eğitmenler', egitmen: 'Eğitmen', raporlar: 'Raporlar', yoklama: 'Yoklama',
-}
 
 function BackTitle({ title, onBack }: { title: string; onBack: () => void }) {
   return (
@@ -578,14 +574,15 @@ function BackTitle({ title, onBack }: { title: string; onBack: () => void }) {
   )
 }
 
-function MenuTab({ isStaff, onNav, onTab }: { isStaff: boolean; onNav: (s: AppScreen) => void; onTab: (t: Tab, which?: 'yaklasan' | 'gecmis') => void }) {
-  const items: { label: string; icon: typeof Home; on: () => void; locked?: boolean }[] = [
-    { label: 'Öğrenciler', icon: Users, on: () => onNav({ kind: 'ogrenciler' }), locked: !isStaff },
-    { label: 'Eğitmenler', icon: GraduationCap, on: () => onNav({ kind: 'egitmenler' }), locked: !isStaff },
-    { label: 'Ders Programı', icon: CalendarDays, on: () => onTab('takvim') },
-    { label: 'Ders Geçmişi', icon: History, on: () => onTab('dersler', 'gecmis') },
-    { label: 'Yoklama', icon: ClipboardCheck, on: () => onNav({ kind: 'yoklama' }), locked: !isStaff },
-    { label: 'Raporlar', icon: BarChart3, on: () => onNav({ kind: 'raporlar' }), locked: !isStaff },
+function MenuTab({ onNav, onTab }: { onNav: (s: AppScreen) => void; onTab: (t: Tab, which?: 'yaklasan' | 'gecmis') => void }) {
+  const items: { label: string; icon: typeof Home; on: () => void }[] = [
+    { label: 'Ana Sayfa', icon: Home, on: () => onTab('ana') },
+    { label: 'Takvim', icon: CalendarDays, on: () => onTab('takvim') },
+    { label: 'Dersler', icon: BookOpenCheck, on: () => onTab('dersler') },
+    { label: 'Öğrenciler', icon: Users, on: () => onTab('ogrenciler') },
+    { label: 'Eğitmenler', icon: GraduationCap, on: () => onNav({ kind: 'egitmenler' }) },
+    { label: 'Yoklama', icon: ClipboardCheck, on: () => onNav({ kind: 'yoklama' }) },
+    { label: 'Raporlar', icon: BarChart3, on: () => onNav({ kind: 'raporlar' }) },
     { label: 'Bildirimler', icon: Bell, on: () => onTab('bildirimler') },
     { label: 'Ayarlar', icon: Settings, on: () => onNav({ kind: 'ayarlar' }) },
   ]
@@ -597,7 +594,6 @@ function MenuTab({ isStaff, onNav, onTab }: { isStaff: boolean; onNav: (s: AppSc
           <button key={it.label} onClick={it.on} className="flex min-h-14 w-full items-center gap-3 px-4 text-left">
             <it.icon className="size-5 text-brand-600" />
             <span className="flex-1 font-semibold">{it.label}</span>
-            {it.locked && <Lock className="size-4 text-slate-300" aria-label="Yetkili cihaz gerekir" />}
             <ChevronRight className="size-4 text-slate-300" />
           </button>
         ))}
@@ -607,7 +603,7 @@ function MenuTab({ isStaff, onNav, onTab }: { isStaff: boolean; onNav: (s: AppSc
   )
 }
 
-function SettingsScreen({ onBack, isStaff, onImport, onExport }: { onBack: () => void; isStaff: boolean; onImport: () => void; onExport: () => void }) {
+function SettingsScreen({ onBack, onImport, onExport }: { onBack: () => void; onImport: () => void; onExport: () => void }) {
   const ios = /iPhone|iPad|iPod/.test(navigator.userAgent)
   const standalone = window.matchMedia?.('(display-mode: standalone)').matches || (navigator as Navigator & { standalone?: boolean }).standalone === true
   return (
@@ -627,12 +623,7 @@ function SettingsScreen({ onBack, isStaff, onImport, onExport }: { onBack: () =>
           <p className="mt-1 text-sm text-slate-600">{ios ? 'Safari\'de Paylaş → "Ana Ekrana Ekle".' : 'Tarayıcı menüsünden "Uygulamayı yükle".'}</p>
         </Card>
       )}
-      <Card className="mt-3 flex items-center gap-3 p-4 text-sm">
-        {isStaff ? <ShieldCheck className="size-5 text-emerald-600" /> : <Lock className="size-5 text-slate-400" />}
-        <span className="flex-1"><b className="block">{isStaff ? 'Yetkili cihaz' : 'Ortak program erişimi'}</b>
-          <span className="text-slate-500">{isStaff ? 'Öğrenci ve eğitmen bilgileri bu cihazda görünür.' : 'Öğrenci ve eğitmen bilgileri yalnızca yetkili cihazlarda görünür.'}</span></span>
-      </Card>
-      <p className="mt-3 px-1 text-xs text-slate-500">Ders notlarına telefon, veli, ödeme veya sağlık bilgisi yazmayın; ders programı bağlantıya sahip herkese açıktır.</p>
+      <p className="mt-3 flex gap-2 px-1 text-xs text-slate-500"><ShieldCheck className="size-4 shrink-0 text-brand-600" />Program, öğrenci ve eğitmen bilgileri bağlantıya sahip herkesçe görülebilir. Telefon, veli, ödeme veya sağlık bilgisi yazmayın.</p>
       <p className="mt-6 text-center text-xs text-slate-400">MUTU AKADEMİ · sürüm {__APP_VERSION__}</p>
     </div>
   )

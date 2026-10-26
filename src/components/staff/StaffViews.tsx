@@ -1,16 +1,16 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import clsx from 'clsx'
 import {
-  ArrowLeft, CalendarDays, ChevronLeft, ChevronRight, Clock, Download, GraduationCap, Lock, Pencil, Phone, Plus, Search, Upload,
+  ArrowLeft, CalendarDays, ChevronLeft, ChevronRight, Clock, Download, GraduationCap, Pencil, Plus, Search, Upload,
   UserPlus, Users, AlertTriangle, CheckCircle2, BarChart3, ClipboardCheck,
 } from 'lucide-react'
 import { addDays, dateKey, formatDayShort, MONTHS, timeHM, WEEKDAYS } from '@/lib/time'
-import { matchesSearch, telHref } from '@/lib/format'
+import { matchesSearch } from '@/lib/format'
 import { errorMessage } from '@/lib/errors'
 import { shared, type SharedAttendance } from '@/lib/sharedApi'
 import {
   staff, hm, exportTable, ATT_LABEL, ATT_ORDER, STATUS_LABEL,
-  type Dashboard, type InstructorStats, type Overview, type Package, type ReportRow, type StaffInstructor, type StaffLesson, type StaffStudent, type StudentStats, type Availability, type WeeklySlot,
+  type Dashboard, type InstructorStats, type Overview, type Package, type ReportRow, type StaffInstructor, type StaffLesson, type StaffStudent, type StudentStats,
 } from '@/lib/staffApi'
 import { Badge, Button, Card, EmptyState, Field, Input, PageLoader, Segmented, Select, Sheet } from '@/components/ui'
 import { useToast } from '@/components/ui/Toast'
@@ -36,8 +36,8 @@ export function useStaffData(enabled: boolean, tick: number) {
   useEffect(() => {
     if (!enabled) return
     let alive = true
-    Promise.all([staff.students(), staff.instructors(), staff.overview()])
-      .then(([s, i, o]) => { if (!alive) return; setStudents(s); setInstructors(i); setOverview(new Map(o.map((x) => [x.id, x]))); setError(null) })
+    staff.directory()
+      .then((d) => { if (!alive) return; setStudents(d.students); setInstructors(d.instructors); setOverview(new Map(d.overview.map((x) => [x.id, x]))); setError(null) })
       .catch((e) => alive && setError(errorMessage(e)))
     return () => { alive = false }
   }, [enabled, tick, n])
@@ -45,15 +45,6 @@ export function useStaffData(enabled: boolean, tick: number) {
 }
 export type StaffData = ReturnType<typeof useStaffData>
 
-export function StaffLock() {
-  return (
-    <Card className="mt-4 p-5 text-center">
-      <span className="mx-auto grid size-12 place-items-center rounded-2xl bg-slate-100 text-slate-600"><Lock className="size-5" /></span>
-      <p className="mt-3 font-bold">Bu bölüm yalnızca yetkili cihazlarda açılır</p>
-      <p className="mt-1 text-sm text-slate-500">Öğrenci ve eğitmen bilgileri korunur. Yöneticinizden bu cihaza özel tek kullanımlık bağlantıyı isteyip bu cihazda açın.</p>
-    </Card>
-  )
-}
 
 function Header({ title, onBack, action }: { title: string; onBack?: () => void; action?: ReactNode }) {
   return (
@@ -178,7 +169,7 @@ export function StaffDashboard({ tick, onNav, onAddStudent, onAddInstructor, onA
 
 // ---------------------------------------------------------------------------
 // Öğrenciler
-export function StudentsScreen({ data, onNav, onBack }: { data: StaffData; onNav: (s: Screen) => void; onBack: () => void }) {
+export function StudentsScreen({ data, onNav, onBack }: { data: StaffData; onNav: (s: Screen) => void; onBack?: () => void }) {
   const [q, setQ] = useState('')
   const [filter, setFilter] = useState<'aktif' | 'pasif' | 'az' | 'tum'>('aktif')
   const [course, setCourse] = useState('')
@@ -192,7 +183,7 @@ export function StudentsScreen({ data, onNav, onBack }: { data: StaffData; onNav
     if (filter === 'az' && !(s.is_active && o && o.purchased > 0 && o.remaining <= 2)) return false
     if (course && !(s.course_names ?? []).includes(course)) return false
     if (instr && !(s.instructor_ids ?? []).includes(instr)) return false
-    return matchesSearch([s.full_name, s.public_label, s.phone, ...(s.course_names ?? [])], q)
+    return matchesSearch([s.full_name, ...(s.course_names ?? [])], q)
   })
   return (
     <div>
@@ -243,11 +234,9 @@ export function StudentProfile({ id, data, tick, onBack, onOpenLesson, onAddLess
   const [st, setSt] = useState<StudentStats | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [editing, setEditing] = useState(false)
-  const [weekly, setWeekly] = useState<WeeklySlot[]>([])
   useEffect(() => {
     let alive = true
     staff.studentStats(id, month).then((x) => { if (alive) { setSt(x); setError(null) } }).catch((e) => alive && setError(errorMessage(e)))
-    staff.weekly(id).then((w) => alive && setWeekly(w)).catch(() => undefined)
     return () => { alive = false }
   }, [id, month, tick])
   if (!s) return <div><Header title="Öğrenci" onBack={onBack} />{data.students === null ? <PageLoader /> : <Card><EmptyState title="Öğrenci bulunamadı" /></Card>}</div>
@@ -297,25 +286,21 @@ export function StudentProfile({ id, data, tick, onBack, onOpenLesson, onAddLess
           <Card className="divide-y divide-slate-100 px-4 text-sm">
             <Row k="Sonraki ders" v={st.next ? <button className="font-semibold text-brand-700" onClick={() => onOpenLesson(st.next!.id)}>{formatDayShort(dateKey(st.next.starts_at))} {timeHM(st.next.starts_at)} · {st.next.course_name}</button> : '—'} />
             <Row k="Son tamamlanan" v={st.last ? <button className="font-semibold" onClick={() => onOpenLesson(st.last!.id)}>{formatDayShort(dateKey(st.last.starts_at))} · {st.last.course_name}{st.last.attendance ? ` · ${ATT_LABEL[st.last.attendance]}` : ''}</button> : '—'} />
-            <Row k="Telefon" v={s.phone ? <a href={telHref(s.phone)} className="flex items-center gap-1 font-semibold text-brand-700"><Phone className="size-3.5" />{s.phone}</a> : '—'} />
-            <Row k="Veli" v={[s.guardian_name, s.guardian_phone].filter(Boolean).join(' · ') || '—'} />
             <Row k="Kayıt tarihi" v={s.registered_at ? s.registered_at.split('-').reverse().join('.') : '—'} />
             <Row k="Kurslar" v={(s.course_names ?? []).join(', ') || '—'} />
             <Row k="Eğitmen" v={(s.instructor_ids ?? []).map(iname).join(', ') || '—'} />
             <Row k="Ders paketi" v={s.package_name || '—'} />
             <Row k="Varsayılan süre" v={`${s.default_duration} dk`} />
-            <Row k="Programda görünen ad" v={s.public_label} />
             <Row k="Durum" v={<Badge tone={s.is_active ? 'green' : 'slate'}>{s.is_active ? 'Aktif' : 'Pasif'}</Badge>} />
           </Card>
-          {s.notes && <Card className="p-4 text-sm"><p className="mb-1 text-xs font-bold uppercase tracking-wide text-slate-500">Notlar</p><p className="whitespace-pre-wrap">{s.notes}</p></Card>}
           <Button block icon={<Plus className="size-4" />} onClick={() => onAddLesson(s.id)}>Bu öğrenciye ders ekle</Button>
         </div>
       ) : tab === 'program' ? (
         <div className="space-y-3">
           <Card className="p-4">
             <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Haftalık program</p>
-            {weekly.length === 0 ? <p className="text-sm text-slate-500">Haftalık düzenli ders tanımlı değil.</p> : (
-              <ul className="space-y-1 text-sm">{weekly.map((w) => <li key={w.id}><b>{WEEKDAYS[w.weekday - 1]}</b> {w.start_time.slice(0, 5)} · {w.duration_minutes} dk{w.instructor_id ? ` · ${iname(w.instructor_id)}` : ''}</li>)}</ul>
+            {(s.weekly ?? []).length === 0 ? <p className="text-sm text-slate-500">Haftalık düzenli ders tanımlı değil.</p> : (
+              <ul className="space-y-1 text-sm">{s.weekly.map((w, i) => <li key={i}><b>{WEEKDAYS[w.weekday - 1]}</b> {w.start} · {w.duration} dk</li>)}</ul>
             )}
           </Card>
           <LessonList title={`${monthLabel(month)} – planlanan dersler`} lessons={st.lessons.filter((l) => l.status === 'planlandi')} onOpen={onOpenLesson} empty="Bu ay planlanan ders yok." />
@@ -393,7 +378,7 @@ function CreditsPanel({ student, credits, tick, onChanged }: { student: StaffStu
     catch (e) { toast.error(errorMessage(e)) } finally { setBusy(false) }
   }
   const voidPkg = async (p: Package) => {
-    try { await staff.voidPackage(p.id, 'Hatalı kayıt'); toast.success('Paket iptal edildi'); setN((x) => x + 1); onChanged() } catch (e) { toast.error(errorMessage(e)) }
+    try { await staff.voidPackage(p.id); toast.success('Paket iptal edildi'); setN((x) => x + 1); onChanged() } catch (e) { toast.error(errorMessage(e)) }
   }
   return (
     <div className="space-y-3">
@@ -407,7 +392,7 @@ function CreditsPanel({ student, credits, tick, onChanged }: { student: StaffStu
         <p className="py-2.5 text-xs font-bold uppercase tracking-wide text-slate-500">Paket ve düzeltme geçmişi</p>
         {pkgs === null ? <PageLoader rows={2} /> : pkgs.length === 0 ? <p className="py-3 text-slate-500">Kayıt yok.</p> : pkgs.map((p) => (
           <div key={p.id} className="flex items-center justify-between gap-3 py-2.5">
-            <span className={clsx('min-w-0', p.is_void && 'text-slate-400 line-through')}><b>{p.name}</b><span className="block text-xs text-slate-500">{p.purchased_at.split('-').reverse().join('.')}{p.note ? ` · ${p.note}` : ''}</span></span>
+            <span className={clsx('min-w-0', p.is_void && 'text-slate-400 line-through')}><b>{p.name}</b><span className="block text-xs text-slate-500">{dmy(p.created_at)}{p.note ? ` · ${p.note}` : ''}</span></span>
             <span className="flex items-center gap-2"><Badge tone={p.lesson_count > 0 ? 'green' : 'red'}>{p.lesson_count > 0 ? '+' : ''}{p.lesson_count}</Badge>
               {!p.is_void && <button className="min-h-10 px-1 text-xs font-semibold text-slate-500" onClick={() => void voidPkg(p)}>İptal</button>}</span>
           </div>
@@ -466,13 +451,11 @@ export function InstructorProfile({ id, data, tick, onBack, onOpenLesson, onNav 
   const [tab, setTab] = useState<'genel' | 'program' | 'istatistik'>('genel')
   const [month, setMonth] = useState(monthKey())
   const [st, setSt] = useState<InstructorStats | null>(null)
-  const [av, setAv] = useState<Availability[]>([])
   const [error, setError] = useState<string | null>(null)
   const [editing, setEditing] = useState(false)
   useEffect(() => {
     let alive = true
     staff.instructorStats(id, month).then((x) => { if (alive) { setSt(x); setError(null) } }).catch((e) => alive && setError(errorMessage(e)))
-    staff.availability(id).then((a) => alive && setAv(a)).catch(() => undefined)
     return () => { alive = false }
   }, [id, month, tick])
   if (!ins) return <div><Header title="Eğitmen" onBack={onBack} />{data.instructors === null ? <PageLoader /> : <Card><EmptyState title="Eğitmen bulunamadı" /></Card>}</div>
@@ -511,11 +494,9 @@ export function InstructorProfile({ id, data, tick, onBack, onOpenLesson, onNav 
             <Tile label="Ertelenen" value={st.total.postponed} /><Tile label="Öğrenci gelmedi" value={st.total.no_show} />
           </div>
           <Card className="divide-y divide-slate-100 px-4 text-sm">
-            <Row k="Telefon" v={ins.phone ? <a href={telHref(ins.phone)} className="flex items-center gap-1 font-semibold text-brand-700"><Phone className="size-3.5" />{ins.phone}</a> : '—'} />
             <Row k="Branş" v={ins.specialty || '—'} />
             <Row k="Verdiği kurslar" v={(ins.course_names ?? []).join(', ') || '—'} />
-            <Row k="Çalışma saatleri" v={av.length ? av.map((a) => `${WEEKDAYS[a.weekday - 1].slice(0, 3)} ${a.start_time.slice(0, 5)}–${a.end_time.slice(0, 5)}`).join(', ') : 'Tanımlı değil'} />
-            <Row k="Programda görünen ad" v={ins.public_label} />
+            <Row k="Çalışma saatleri" v={ins.work_days.length ? `${ins.work_days.map((d) => WEEKDAYS[d - 1].slice(0, 3)).join(", ")} · ${ins.work_start ?? ""}–${ins.work_end ?? ""}` : "Tanımlı değil"} />
             <Row k="Durum" v={<Badge tone={ins.is_active ? 'green' : 'slate'}>{ins.is_active ? 'Aktif' : 'Pasif'}</Badge>} />
           </Card>
           <Card className="divide-y divide-slate-100 px-4 text-sm">
@@ -524,7 +505,6 @@ export function InstructorProfile({ id, data, tick, onBack, onOpenLesson, onNav 
               <button key={s.id} onClick={() => onNav({ kind: 'ogrenci', id: s.id })} className={clsx('flex w-full py-2.5 text-left font-medium', !s.is_active && 'text-slate-400')}>{s.name}</button>
             ))}
           </Card>
-          {ins.notes && <Card className="p-4 text-sm"><p className="mb-1 text-xs font-bold uppercase tracking-wide text-slate-500">Notlar</p><p className="whitespace-pre-wrap">{ins.notes}</p></Card>}
         </div>
       ) : tab === 'program' ? (
         <div className="space-y-3">

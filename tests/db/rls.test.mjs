@@ -743,6 +743,66 @@ r = await as(admin, `select count(*)::int n from public.staff_students_overview(
 ok('öğrenci listesi özeti kalan hakkı verir', r.rows?.[0]?.n === 1, r.error?.message)
 await db.query(`delete from private.shared_writes`)
 
+// ortak çalışma alanı: girişsiz öğrenci/eğitmen yönetimi (hassas veri yok)
+r = await as('anon', `select count(*)::int n from public.ws_students`)
+ok('ortak öğrenci tablosu doğrudan okunamaz (yalnızca RPC)', !!r.error)
+r = await as('anon', `select public.ws_save_instructor($1) x`, [{ name: 'Selin Hoca', specialty: 'Keman', courses: ['Keman'], work_days: [1, 2, 3, 4, 5, 6, 7], work_start: '08:00', work_end: '22:00' }])
+const wsI = r.rows?.[0]?.x
+ok('girişsiz eğitmen eklenir', !!wsI?.id, r.error?.message)
+r = await as('anon', `select public.ws_save_student($1) x`, [{ name: 'Deniz', courses: ['Keman'], instructor_ids: [wsI?.id], total_credits: 6, default_duration: 45 }])
+const wsS = r.rows?.[0]?.x
+ok('girişsiz öğrenci eklenir, başlangıç hakkı paket olur', wsS?.purchased === 6 && wsS.remaining === 6, r.error?.message ?? JSON.stringify(wsS))
+r = await as('anon', `select public.ws_save_student($1) x`, [{ name: 'Can', total_credits: 4 }])
+const wsS2 = r.rows?.[0]?.x
+ok('girişsiz öğrenci verisinde telefon/veli alanı yok', wsS && !('phone' in wsS) && !('guardian_name' in wsS))
+const wl = (o) => ({ course_name: 'Keman', instructor_id: wsI.id, ...o })
+r = await as('anon', `select public.ws_create($1) x`, [wl({ student_ids: [wsS.id], date: sd(-2), start: '16:00', end: '17:00' })])
+const w1 = r.rows?.[0]?.x?.first_id
+ok('öğrenciye/eğitmene bağlı ders eklenir', !!w1, r.error?.message)
+r = await as('anon', `select public.shared_get($1) x`, [w1])
+ok('ders satırında öğrenci adı ve bağlantı görünür', r.rows?.[0]?.x?.student_label === 'Deniz' && r.rows[0].x.ws_student_ids?.[0] === wsS.id && r.rows[0].x.instructor_name === 'Selin Hoca', JSON.stringify(r.rows?.[0]?.x))
+r = await as('anon', `select public.ws_create($1) x`, [wl({ student_ids: [wsS.id], course_name: 'Başka', date: sd(-2), start: '16:30', end: '17:30', instructor_id: null })])
+ok('aynı öğrenci aynı saatte iki derse yazılamaz (ortak alan)', !!r.error && /Çakışma/.test(r.error.message), r.error?.message)
+r = await as('anon', `select public.ws_complete($1, null, $2::jsonb) x`, [w1, JSON.stringify({ [wsS.id]: 'katildi' })])
+ok('ortak alanda öğrenci yoklaması', r.rows?.[0]?.x?.status === 'tamamlandi' && r.rows[0].x.ws_att?.[wsS.id] === 'katildi', r.error?.message)
+r = await as('anon', `select public.ws_create($1) x`, [wl({ student_ids: [wsS.id, wsS2.id], date: sd(-3), start: '18:00', end: '19:30' })])
+const w2 = r.rows?.[0]?.x?.first_id
+r = await as('anon', `select public.ws_complete($1, null, $2::jsonb) x`, [w2, JSON.stringify({ [wsS.id]: 'erken_ayrildi', [wsS2.id]: 'izinli' })])
+ok('grup dersi öğrenci başına yoklama', r.rows?.[0]?.x?.group_attendance?.Can === 'izinli', r.error?.message)
+r = await as('anon', `select public.ws_complete($1, null, $2::jsonb) x`, [w2, JSON.stringify({ [wsS.id]: 'erken_ayrildi', [wsS2.id]: 'izinli' })])
+r = await as('anon', `select public.ws_student_stats($1) x`, [wsS.id])
+let ws = r.rows?.[0]?.x
+ok('ortak alan: öğrenci toplam süre 60+90 dk, hak 6-2=4 (çift düşüm yok)', ws?.total?.attended_min === 150 && ws.credits.used === 2 && ws.credits.remaining === 4, r.error?.message ?? JSON.stringify({ t: ws?.total, c: ws?.credits }))
+r = await as('anon', `select public.ws_student_stats($1) x`, [wsS2.id])
+ws = r.rows?.[0]?.x
+ok('izinli öğrenci: süre yok, hak düşmez', ws?.total?.attended_min === 0 && ws.total.excused === 1 && ws.credits.used === 0, JSON.stringify(ws?.total))
+r = await as('anon', `select public.ws_instructor_stats($1) x`, [wsI.id])
+ok('ortak alan: eğitmen süresi grup dersinde bir kez (150 dk)', r.rows?.[0]?.x?.total?.taught_min === 150 && r.rows[0].x.students.length === 2, r.error?.message ?? JSON.stringify(r.rows?.[0]?.x?.total))
+r = await as('anon', `select public.ws_create($1) x`, [wl({ student_ids: [wsS.id], date: sd(5), start: '10:00', end: '11:00' })])
+const w3 = r.rows?.[0]?.x?.first_id
+r = await as('anon', `select public.shared_postpone($1, null, $2::date, '12:00', '13:00', 'ogrenci') x`, [w3, sd(6)])
+const w3n = r.rows?.[0]?.x?.new_id
+r = await as('anon', `select public.shared_get($1) x`, [w3n])
+ok('ertelenen dersin yeni kaydı öğrenci bağlantısını korur', r.rows?.[0]?.x?.ws_student_ids?.[0] === wsS.id, r.error?.message)
+r = await as('anon', `select public.ws_student_stats($1) x`, [wsS.id])
+ok('ertelenen ders çift sayılmaz', r.rows?.[0]?.x?.total?.postponed === 1 && r.rows[0].x.total.planned === 3 && r.rows[0].x.next?.id === w3n, JSON.stringify(r.rows?.[0]?.x?.total))
+r = await as('anon', `select public.ws_save_instructor($1, $2, null) x`, [{ name: 'Selin Hoca', work_days: [wd(sd(9))], work_start: '09:00', work_end: '12:00' }, wsI.id])
+r = await as('anon', `select public.ws_create($1) x`, [wl({ student_ids: [wsS2.id], date: sd(9), start: '13:00', end: '14:00' })])
+ok('ortak alan: eğitmen çalışma saati dışında ders eklenemez', !!r.error && /çalışmıyor/.test(r.error.message), r.error?.message)
+r = await as('anon', `select public.ws_create($1) x`, [wl({ student_ids: [wsS2.id], date: sd(9 + 1), start: '10:00', end: '11:00' })])
+ok('ortak alan: eğitmen çalışmadığı gün ders eklenemez', !!r.error && /çalışmıyor/.test(r.error.message), r.error?.message)
+r = await as('anon', `select public.ws_save_student($1, $2, $3) x`, [{ name: 'Deniz', total_credits: 10 }, wsS.id, wsS.version])
+ok('toplam hak değişince düzeltme hareketi eklenir', r.rows?.[0]?.x?.purchased === 10 && r.rows[0].x.remaining === 8, r.error?.message ?? JSON.stringify(r.rows?.[0]?.x))
+r = await as('anon', `select public.ws_save_student($1, $2, $3) x`, [{ name: 'Deniz' }, wsS.id, wsS.version])
+ok('eski sürümle düzenleme reddedilir', !!r.error)
+r = await as('anon', `select public.ws_dashboard() x`)
+ok('ortak alan panel istatistikleri', r.rows?.[0]?.x?.active_students >= 2 && r.rows[0].x.instructors >= 1, r.error?.message)
+r = await as('anon', `select count(*)::int n from public.ws_report(current_date - 40, current_date) where lesson_id = $1`, [w2])
+ok('ortak alan raporu grup dersini öğrenci başına verir', r.rows?.[0]?.n === 2, r.error?.message)
+r = await as('anon', `select public.ws_directory() x`)
+ok('dizin öğrenci hak özetini verir', r.rows?.[0]?.x?.students?.find((s) => s.id === wsS.id)?.remaining === 8, r.error?.message)
+await db.query(`delete from private.shared_writes`)
+
 // hız sınırı (en sonda; aynı istemciden 60 yazma / 10 dk)
 let limited = false
 for (let i = 0; i < 70 && !limited; i++) {
