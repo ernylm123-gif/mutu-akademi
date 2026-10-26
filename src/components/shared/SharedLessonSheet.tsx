@@ -7,6 +7,7 @@ import { errorMessage } from '@/lib/errors'
 import { shared, groupNames, ACTION_TEXT, type SharedAttendance, type SharedDetail, type SharedLesson } from '@/lib/sharedApi'
 import { Badge, Button, Field, Input, Select, Sheet, Textarea } from '@/components/ui'
 import { useToast } from '@/components/ui/Toast'
+import { staff, type StaffStudent } from '@/lib/staffApi'
 
 type Mode = 'view' | 'complete' | 'postpone' | 'cancel' | 'delete'
 
@@ -14,13 +15,16 @@ export const sharedStatus = (l: SharedLesson) =>
   displayStatus({ status: l.status, starts_at: l.starts_at, ends_at: l.ends_at, started_at: l.started_at, attendance: l.attendance ? { status: l.attendance } : null })
 
 /** Ortak ders detayı ve işlemleri. Her işlem sunucuda doğrulanır; başarısızsa gerçek nedeni gösterilir. */
-export function SharedLessonSheet({ lesson, onClose, onEdit, onChanged, onDeleted, onOpen }: {
+export function SharedLessonSheet({ lesson, onClose, onEdit, onChanged, onDeleted, onOpen, staffStudents, onOpenStudent }: {
   lesson: SharedLesson | null
   onClose: () => void
   onEdit: (l: SharedLesson) => void
   onChanged: () => void
   onDeleted: (l: SharedLesson, ids: string[]) => void
   onOpen: (id: string) => void
+  /** Yetkili cihazda: kayıtlı öğrenciler (öğrenci bazında yoklama için) */
+  staffStudents?: StaffStudent[] | null
+  onOpenStudent?: (id: string) => void
 }) {
   const toast = useToast()
   const [mode, setMode] = useState<Mode>('view')
@@ -34,6 +38,8 @@ export function SharedLessonSheet({ lesson, onClose, onEdit, onChanged, onDelete
   const [reason, setReason] = useState('ogrenci')
   const [text, setText] = useState('')
   const [groupAtt, setGroupAtt] = useState<Record<string, SharedAttendance>>({})
+  const [linkIds, setLinkIds] = useState<string[]>([])
+  const [idAtt, setIdAtt] = useState<Record<string, SharedAttendance>>({})
 
   useEffect(() => {
     if (!lesson) return
@@ -47,6 +53,14 @@ export function SharedLessonSheet({ lesson, onClose, onEdit, onChanged, onDelete
     if (!lesson) { setDetail(null); return }
     let alive = true
     shared.get(lesson.id).then((d) => alive && setDetail(d)).catch(() => undefined)
+    if (staffStudents) {
+      staff.links([lesson.id]).then((r) => {
+        if (!alive) return
+        const ids = r[0]?.student_ids ?? []
+        setLinkIds(ids)
+        setIdAtt(Object.fromEntries(ids.map((id) => [id, r[0]?.student_att?.[id] ?? lesson.attendance ?? 'katildi'])))
+      }).catch(() => alive && setLinkIds([]))
+    } else setLinkIds([])
     return () => { alive = false }
   }, [lesson?.id, lesson?.version]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -55,6 +69,8 @@ export function SharedLessonSheet({ lesson, onClose, onEdit, onChanged, onDelete
   const st = sharedStatus(l)
   const names = groupNames(l.student_label)
   const isGroup = l.is_group && names.length > 1
+  const linked = !!staffStudents && linkIds.length > 0
+  const sname = (id: string) => staffStudents?.find((x) => x.id === id)?.full_name ?? 'Öğrenci'
   const del = async (scope: 'this' | 'following' | 'all') => {
     if (busy) return
     setBusy(true); setError(null)
@@ -103,7 +119,10 @@ export function SharedLessonSheet({ lesson, onClose, onEdit, onChanged, onDelete
             {l.series_id && <Badge tone="brand">Haftalık tekrar</Badge>}
           </div>
           <div className="grid gap-2 text-sm">
-            {l.student_label && <p className="flex items-center gap-2">{l.is_group ? <Users className="size-4 text-slate-400" /> : <User className="size-4 text-slate-400" />}{l.student_label}</p>}
+            {linked ? (
+              <p className="flex flex-wrap items-center gap-2">{linkIds.length > 1 ? <Users className="size-4 text-slate-400" /> : <User className="size-4 text-slate-400" />}
+                {linkIds.map((id) => <button key={id} onClick={() => { onClose(); onOpenStudent?.(id) }} className="font-semibold text-brand-700">{sname(id)}</button>)}</p>
+            ) : l.student_label && <p className="flex items-center gap-2">{l.is_group ? <Users className="size-4 text-slate-400" /> : <User className="size-4 text-slate-400" />}{l.student_label}</p>}
             {l.instructor_name && <p className="flex items-center gap-2"><GraduationCap className="size-4 text-slate-400" />{l.instructor_name}</p>}
             {l.room && <p className="flex items-center gap-2"><DoorOpen className="size-4 text-slate-400" />{l.room}</p>}
             {l.note && <p className="rounded-xl bg-slate-50 px-3 py-2 text-slate-600">{l.note}</p>}
@@ -159,11 +178,24 @@ export function SharedLessonSheet({ lesson, onClose, onEdit, onChanged, onDelete
       {mode === 'complete' && (
         <div className="space-y-4">
           <p className="text-sm text-slate-500">Ders saati dolsa bile otomatik tamamlanmaz. Yoklama sonucunu seçip onaylayın; aynı işlem iki kez kaydedilmez.</p>
-          {isGroup ? names.map((n) => (
+          {linked ? linkIds.map((id) => (
+            <div key={id}>
+              <p className="mb-1.5 text-sm font-semibold">{sname(id)}</p>
+              <div className="grid grid-cols-3 gap-1.5">
+                {ATTENDANCE_ORDER.map((s) => (
+                  <button key={s} type="button" aria-pressed={idAtt[id] === s} aria-label={`${sname(id)}: ${s === 'katilmadi' ? 'Gelmedi' : ATTENDANCE_STATUS[s].label}`}
+                    onClick={() => setIdAtt((g) => ({ ...g, [id]: s }))}
+                    className={clsx('h-11 rounded-xl text-sm font-semibold', idAtt[id] === s ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-700')}>
+                    {s === 'katilmadi' ? 'Gelmedi' : ATTENDANCE_STATUS[s].label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )) : isGroup ? names.map((n) => (
             <div key={n}>
               <p className="mb-1.5 text-sm font-semibold">{n}</p>
               <div className="grid grid-cols-3 gap-1.5">
-                {(['katildi', 'katilmadi', 'izinli'] as SharedAttendance[]).map((s) => (
+                {ATTENDANCE_ORDER.map((s) => (
                   <button key={s} type="button" aria-pressed={groupAtt[n] === s} aria-label={`${n}: ${s === 'katilmadi' ? 'Gelmedi' : ATTENDANCE_STATUS[s].label}`}
                     onClick={() => setGroupAtt((g) => ({ ...g, [n]: s }))}
                     className={clsx('h-11 rounded-xl text-sm font-semibold', groupAtt[n] === s ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-700')}>
@@ -182,7 +214,7 @@ export function SharedLessonSheet({ lesson, onClose, onEdit, onChanged, onDelete
               ))}
             </div>
           )}
-          <div className="flex gap-2">{back}<Button block loading={busy} onClick={() => void run(() => shared.complete(l, att, isGroup ? groupAtt : null), 'Ders tamamlandı olarak kaydedildi')}>Kaydet</Button></div>
+          <div className="flex gap-2">{back}<Button block loading={busy} onClick={() => void run(() => (linked ? staff.complete(l, idAtt) : shared.complete(l, att, isGroup ? groupAtt : null)), 'Ders tamamlandı olarak kaydedildi')}>Kaydet</Button></div>
         </div>
       )}
 

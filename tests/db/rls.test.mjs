@@ -671,6 +671,78 @@ r = await as('anon', `select public.shared_import($1, '66666666-2222-4333-8444-5
 ok('aynı içe aktarma iki kez uygulanmaz', r.rows?.[0]?.x?.duplicate === true)
 await db.query(`delete from private.shared_writes`)
 
+// öğrenci/eğitmen bağlantısı ve hesaplanan istatistikler
+r = await as(admin, `insert into public.students (full_name, total_lessons) values ('Ezgi Kaya', 10), ('Mert Can', 5) returning id, public_label`)
+const [stE, stM] = r.rows ?? []
+ok('öğrenci paylaşılabilir kısa adı otomatik oluşur', stE?.public_label === 'Ezgi K.', r.error?.message ?? JSON.stringify(r.rows))
+r = await as(admin, `insert into public.instructors (full_name) values ('Ahmet Yılmaz') returning id, public_label`)
+const insA = r.rows?.[0]
+ok('eğitmen eklenir', insA?.public_label === 'Ahmet Y.', r.error?.message)
+const lp = (o) => ({ course_name: 'Piyano', instructor_id: insA.id, ...o })
+r = await as('anon', `select public.staff_create($1) x`, [lp({ student_ids: [stE.id], date: sd(-2), start: '10:00', end: '11:30' })])
+ok('yetkisiz istemci öğrenciye bağlı ders ekleyemez', !!r.error)
+r = await as(admin, `select public.staff_create($1) x`, [lp({ student_ids: [stE.id], date: sd(-2), start: '10:00', end: '11:30' })])
+const pl1 = r.rows?.[0]?.x?.first_id
+ok('yetkili cihaz öğrenciye bağlı ders ekler', !!pl1, r.error?.message)
+r = await as('anon', `select public.shared_get($1) x`, [pl1])
+ok('herkese açık ders satırında öğrenci kimliği/bağlantı yok, yalnızca kısa ad var',
+  r.rows?.[0]?.x?.student_label === 'Ezgi K.' && !('student_ids' in r.rows[0].x) && !('instructor_id' in r.rows[0].x) && r.rows[0].x.instructor_name === 'Ahmet Y.', JSON.stringify(r.rows?.[0]?.x))
+r = await as('anon', `select count(*)::int n from public.staff_report(current_date - 30, current_date)`)
+ok('yetkisiz istemci rapor alamaz', !!r.error)
+r = await as(admin, `select public.staff_create($1) x`, [{ course_name: 'Başka', student_ids: [stE.id], date: sd(-2), start: '11:00', end: '12:00' }])
+ok('aynı öğrenci aynı saatte iki derse yazılamaz', !!r.error && /Çakışma/.test(r.error.message), r.error?.message)
+r = await as(admin, `select public.staff_complete($1, null, $2::jsonb) x`, [pl1, JSON.stringify({ [stE.id]: 'katildi' })])
+ok('öğrenci yoklaması kaydedilir', r.rows?.[0]?.x?.status === 'tamamlandi', r.error?.message)
+r = await as(admin, `select public.staff_create($1) x`, [lp({ student_ids: [stE.id, stM.id], date: sd(-3), start: '14:00', end: '15:00' })])
+const grp2 = r.rows?.[0]?.x?.first_id
+r = await as('anon', `select public.shared_get($1) x`, [grp2])
+ok('çok öğrencili ders grup dersi olur', r.rows?.[0]?.x?.is_group === true && /Ezgi K\./.test(r.rows[0].x.student_label), JSON.stringify(r.rows?.[0]?.x))
+r = await as(admin, `select public.staff_complete($1, null, $2::jsonb) x`, [grp2, JSON.stringify({ [stE.id]: 'gec_geldi', [stM.id]: 'katilmadi' })])
+ok('grup dersinde öğrenci başına yoklama (kimlikle)', r.rows?.[0]?.x?.group_attendance?.['Mert C.'] === 'katilmadi', r.error?.message)
+const monthOf = (d) => d.slice(0, 7) + '-01'
+r = await as(admin, `select public.staff_student_stats($1, $2::date) x`, [stE.id, monthOf(sd(-2))])
+let ss = r.rows?.[0]?.x
+const sameMonth = monthOf(sd(-2)) === monthOf(sd(-3))
+ok('öğrenci toplam eğitim süresi gerçek kayıtlardan (90+60 dk)', ss?.total?.attended_min === 150 && ss.total.attended === 2, r.error?.message ?? JSON.stringify(ss?.total))
+ok('öğrenci ayı doğru hesaplanır', ss?.month?.attended_min === (sameMonth ? 150 : 90), JSON.stringify(ss?.month))
+ok('ders hakkı hesaplanır (10 alındı, 2 kullanıldı, 8 kaldı)', ss?.credits?.purchased === 10 && ss.credits.used === 2 && ss.credits.remaining === 8, JSON.stringify(ss?.credits))
+ok('kurs bazında süre', ss?.by_course?.[0]?.course === 'Piyano' && ss.by_course[0].attended_min === 150, JSON.stringify(ss?.by_course))
+r = await as(admin, `select public.staff_student_stats($1) x`, [stM.id])
+ss = r.rows?.[0]?.x
+ok('gelmeyen öğrenci: süre eklenmez, devamsızlık sayılır, hak düşer', ss?.total?.attended_min === 0 && ss.total.absent === 1 && ss.credits.used === 1 && ss.credits.remaining === 4, JSON.stringify(ss))
+r = await as(admin, `select public.staff_complete($1, null, $2::jsonb) x`, [grp2, JSON.stringify({ [stE.id]: 'gec_geldi', [stM.id]: 'katilmadi' })])
+r = await as(admin, `select (public.staff_student_stats($1)->'credits'->>'used')::int n`, [stE.id])
+ok('aynı yoklama tekrar kaydedilince hak iki kez düşmez', r.rows?.[0]?.n === 2, r.error?.message)
+r = await as(admin, `select public.staff_instructor_stats($1) x`, [insA.id])
+ok('eğitmen süresi grup dersinde bir kez sayılır (150 dk)', r.rows?.[0]?.x?.total?.taught_min === 150 && r.rows[0].x.total.completed === 2, r.error?.message ?? JSON.stringify(r.rows?.[0]?.x?.total))
+ok('eğitmenin öğrencileri listelenir', r.rows?.[0]?.x?.students?.length === 2)
+r = await as(admin, `select count(*)::int n from public.staff_report(current_date - 40, current_date) where lesson_id = $1`, [grp2])
+ok('raporda grup dersi öğrenci başına satır', r.rows?.[0]?.n === 2, r.error?.message)
+r = await as(admin, `select public.staff_create($1) x`, [lp({ student_ids: [stE.id], date: sd(5), start: '10:00', end: '11:00' })])
+const fut = r.rows?.[0]?.x?.first_id
+r = await as('anon', `select public.shared_update($1, null, '{"student_label":"Başkası"}'::jsonb) x`, [fut])
+ok('bağlı dersin öğrencisi herkese açık arayüzden değiştirilemez', !!r.error, JSON.stringify(r.rows))
+r = await as('anon', `select public.shared_postpone($1, null, $2::date, '15:00', '16:00', 'ogrenci') x`, [fut, sd(6)])
+const movedP = r.rows?.[0]?.x?.new_id
+r = await as(admin, `select student_ids, instructor_id from public.staff_links(array[$1]::uuid[])`, [movedP ?? fut])
+ok('ertelenen dersin yeni kaydı öğrenci/eğitmen bağlantısını korur', r.rows?.[0]?.student_ids?.[0] === stE.id && r.rows[0].instructor_id === insA.id, r.error?.message)
+r = await as(admin, `select public.staff_student_stats($1) x`, [stE.id])
+ss = r.rows?.[0]?.x
+ok('erteleme çift sayılmaz (1 ertelenen, planlanan 3)', ss?.total?.postponed === 1 && ss.total.planned === 3, JSON.stringify(ss?.total))
+ok('sonraki ders tarihi gösterilir', ss?.next?.id === movedP, JSON.stringify(ss?.next))
+const wd = (d) => ((new Date(d + 'T12:00:00Z').getUTCDay() + 6) % 7) + 1
+r = await as(admin, `select public.staff_set_availability($1, array[$2]::int[], '09:00', '12:00')`, [insA.id, wd(sd(9))])
+r = await as(admin, `select public.staff_create($1) x`, [lp({ student_ids: [stM.id], date: sd(9), start: '13:00', end: '14:00' })])
+ok('eğitmen çalışma saati dışında ders eklenemez', !!r.error && /çalışmıyor/.test(r.error.message), r.error?.message)
+r = await as(admin, `select public.staff_create($1) x`, [lp({ student_ids: [stM.id], date: sd(9), start: '10:00', end: '11:00' })])
+ok('eğitmen çalışma saati içinde ders eklenir', !!r.rows?.[0]?.x?.first_id, r.error?.message)
+r = await as(admin, `select public.staff_set_availability($1, '{}'::int[], null, null)`, [insA.id])
+r = await as(admin, `select public.staff_dashboard() x`)
+ok('panel istatistikleri (aktif öğrenci, eğitmen)', r.rows?.[0]?.x?.active_students >= 2 && r.rows[0].x.instructors >= 1, r.error?.message)
+r = await as(admin, `select count(*)::int n from public.staff_students_overview() where remaining = 8 and id = $1`, [stE.id])
+ok('öğrenci listesi özeti kalan hakkı verir', r.rows?.[0]?.n === 1, r.error?.message)
+await db.query(`delete from private.shared_writes`)
+
 // hız sınırı (en sonda; aynı istemciden 60 yazma / 10 dk)
 let limited = false
 for (let i = 0; i < 70 && !limited; i++) {

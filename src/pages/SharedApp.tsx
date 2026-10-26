@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import clsx from 'clsx'
 import {
   Home, CalendarDays, BookOpenCheck, Bell, Menu as MenuIcon, Plus, Radio, WifiOff, ChevronLeft, ChevronRight, RefreshCw,
-  BellRing, Send, Lock, Smartphone, Search, Activity, Megaphone, Info, Upload, Download,
+  BellRing, Send, Lock, Smartphone, Search, Activity, Megaphone, Info, Upload, Download, Users, GraduationCap, History, ClipboardCheck, BarChart3, Settings, ShieldCheck,
 } from 'lucide-react'
 import { publicClient } from '@/lib/publicClient'
 import {
@@ -19,6 +19,13 @@ import { usePush } from '@/hooks/usePush'
 import { SharedLessonForm } from '@/components/shared/SharedLessonForm'
 import { SharedLessonSheet, sharedStatus } from '@/components/shared/SharedLessonSheet'
 import { ImportSheet, ExportSheet } from '@/components/shared/SharedImportExport'
+import { useAuth } from '@/hooks/useAuth'
+import {
+  useStaffData, StaffLock, StaffDashboard, StudentsScreen, StudentProfile, InstructorsScreen, InstructorProfile, ReportsScreen, AttendanceScreen, type Screen,
+} from '@/components/staff/StaffViews'
+import { StudentFormSheet, InstructorFormSheet } from '@/components/staff/StaffForms'
+
+type AppScreen = Screen | { kind: 'ayarlar' }
 
 type Tab = 'ana' | 'takvim' | 'dersler' | 'bildirimler' | 'menu'
 type Live = 'connecting' | 'live' | 'offline'
@@ -132,6 +139,26 @@ export function SharedApp() {
   const [undo, setUndo] = useState<{ l: SharedLesson; ids: string[] } | null>(null)
   const [importOpen, setImportOpen] = useState(false)
   const [exportRange, setExportRange] = useState<[string, string] | null>(null)
+  const [presetStudent, setPresetStudent] = useState<string | null>(null)
+  const [lessonsWhich, setLessonsWhich] = useState<'yaklasan' | 'gecmis'>('yaklasan')
+  const [quickAdd, setQuickAdd] = useState<'ogrenci' | 'egitmen' | null>(null)
+
+  // Yetkili cihaz: korumalı öğrenci/eğitmen modülleri aynı arayüzde açılır
+  const { profile } = useAuth()
+  const isStaff = !!profile?.approved && !!profile.is_active && (profile.role === 'admin' || profile.role === 'personel')
+  const sdata = useStaffData(isStaff, tick)
+  const staffCtx = isStaff && sdata.students && sdata.instructors ? { students: sdata.students, instructors: sdata.instructors, reload: sdata.reload } : null
+
+  // Alt ekranlar (öğrenci profili vb.) tarayıcı/telefon "geri" hareketiyle kapanır
+  const [screen, setScreen] = useState<AppScreen | null>(null)
+  useEffect(() => {
+    const onPop = (e: PopStateEvent) => setScreen((e.state as { mutuScreen?: AppScreen } | null)?.mutuScreen ?? null)
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
+  const nav = useCallback((s: AppScreen) => { window.history.pushState({ mutuScreen: s }, ''); setScreen(s); window.scrollTo(0, 0) }, [])
+  const goBack = useCallback(() => window.history.back(), [])
+  const goTab = (t: Tab) => { if (screen) { setScreen(null); window.history.replaceState(null, '') } setTab(t); window.scrollTo(0, 0) }
 
   // Öneriler ve Ana Sayfa için yakın dönem (son 31 gün – gelecek 31 gün)
   const near = useShared(addDays(today, -31), addDays(today, 31), tick)
@@ -174,13 +201,27 @@ export function SharedApp() {
 
   useEffect(() => { if (!undo) return; const t = setTimeout(() => setUndo(null), 10_000); return () => clearTimeout(t) }, [undo])
 
-  const openNew = (date?: string) => { setEditing(null); setFormDate(date); setFormOpen(true) }
+  const openNew = (date?: string, studentId?: string) => { setEditing(null); setFormDate(date); setPresetStudent(studentId ?? null); setFormOpen(true) }
+  const openStudent = (id: string) => nav({ kind: 'ogrenci', id })
+
+  const renderScreen = (s: AppScreen) => {
+    if (s.kind === 'ayarlar') return <SettingsScreen onBack={goBack} isStaff={isStaff} onImport={() => setImportOpen(true)} onExport={() => setExportRange([startOfWeek(today), addDays(startOfWeek(today), 35)])} />
+    if (!isStaff) return <div><BackTitle title={SCREEN_TITLE[s.kind]} onBack={goBack} /><StaffLock /></div>
+    switch (s.kind) {
+      case 'ogrenciler': return <StudentsScreen data={sdata} onNav={nav} onBack={goBack} />
+      case 'ogrenci': return <StudentProfile key={s.id} id={s.id} data={sdata} tick={tick} onBack={goBack} onOpenLesson={openById} onAddLesson={(sid) => openNew(undefined, sid)} />
+      case 'egitmenler': return <InstructorsScreen data={sdata} onNav={nav} onBack={goBack} />
+      case 'egitmen': return <InstructorProfile key={s.id} id={s.id} data={sdata} tick={tick} onBack={goBack} onOpenLesson={openById} onNav={nav} />
+      case 'raporlar': return <ReportsScreen data={sdata} onBack={goBack} />
+      case 'yoklama': return <AttendanceScreen data={sdata} tick={tick} onBack={goBack} onOpenLesson={openById} />
+    }
+  }
 
   return (
     <div className="min-h-dvh bg-[#f8fafc] lg:pb-0">
       <header className="safe-top sticky top-0 z-20 border-b border-slate-200/60 bg-white/90 backdrop-blur-xl">
         <div className="mx-auto flex h-14 max-w-3xl items-center justify-between px-4">
-          <button onClick={() => setTab('ana')} className="flex items-center gap-2.5" aria-label="Ana sayfa">
+          <button onClick={() => goTab('ana')} className="flex items-center gap-2.5" aria-label="Ana sayfa">
             <img src="/logo.png" alt="" width={32} height={32} />
             <span className="leading-none">
               <span className="block text-[15px] font-extrabold tracking-[0.14em]">MUTU</span>
@@ -196,11 +237,17 @@ export function SharedApp() {
       </header>
 
       <main className="pb-nav mx-auto max-w-3xl px-4 pt-4">
-        {tab === 'ana' && <HomeTab data={near.data} error={near.error} onOpen={setSelected} onAdd={() => openNew()} onRetry={refresh} tick={tick} />}
-        {tab === 'takvim' && <CalendarTab tick={tick} onOpen={setSelected} onAdd={openNew} onExport={(f, t) => setExportRange([f, t])} onImport={() => setImportOpen(true)} />}
-        {tab === 'dersler' && <LessonsTab tick={tick} onOpen={setSelected} />}
-        {tab === 'bildirimler' && <NotificationsTab tick={tick} onOpenId={openById} />}
-        {tab === 'menu' && <MenuTab onImport={() => setImportOpen(true)} onExport={() => setExportRange([startOfWeek(today), addDays(startOfWeek(today), 35)])} />}
+        {screen ? renderScreen(screen) : (
+          <>
+            {tab === 'ana' && <HomeTab data={near.data} error={near.error} onOpen={setSelected} onAdd={() => openNew()} onRetry={refresh} tick={tick}
+              staffSlot={isStaff ? <StaffDashboard tick={tick} onNav={nav} onAddStudent={() => setQuickAdd('ogrenci')} onAddInstructor={() => setQuickAdd('egitmen')} onAddLesson={() => openNew()} onImport={() => setImportOpen(true)} /> : null} />}
+            {tab === 'takvim' && <CalendarTab tick={tick} onOpen={setSelected} onAdd={openNew} onExport={(f, t) => setExportRange([f, t])} onImport={() => setImportOpen(true)} />}
+            {tab === 'dersler' && <LessonsTab key={lessonsWhich} initial={lessonsWhich} tick={tick} onOpen={setSelected} />}
+            {tab === 'bildirimler' && <NotificationsTab tick={tick} onOpenId={openById} />}
+            {tab === 'menu' && <MenuTab isStaff={isStaff} onNav={nav}
+              onTab={(t, which) => { if (which) setLessonsWhich(which); goTab(t) }} />}
+          </>
+        )}
       </main>
 
       <button onClick={() => openNew(tab === 'ana' ? undefined : undefined)} aria-label="Ders ekle"
@@ -226,26 +273,34 @@ export function SharedApp() {
       <nav className="safe-bottom fixed inset-x-0 bottom-0 z-30 border-t border-slate-200/70 bg-white/95 backdrop-blur-xl">
         <div className="mx-auto grid max-w-3xl grid-cols-5">
           {TABS.map((t) => (
-            <button key={t.id} onClick={() => setTab(t.id)} aria-current={tab === t.id ? 'page' : undefined}
-              className={clsx('flex h-16 flex-col items-center justify-center gap-1 text-[11px] font-semibold', tab === t.id ? 'text-brand-600' : 'text-slate-500')}>
+            <button key={t.id} onClick={() => { if (t.id === 'dersler') setLessonsWhich('yaklasan'); goTab(t.id) }} aria-current={!screen && tab === t.id ? 'page' : undefined}
+              className={clsx('flex h-16 flex-col items-center justify-center gap-1 text-[11px] font-semibold', !screen && tab === t.id ? 'text-brand-600' : 'text-slate-500')}>
               <t.icon className="size-6" />{t.label}
             </button>
           ))}
         </div>
       </nav>
 
-      <SharedLessonSheet lesson={selected} onClose={() => setSelected(null)} onChanged={reloadSelected}
-        onEdit={(l) => { setSelected(null); setEditing(l); setFormOpen(true) }}
-        onDeleted={(l, ids) => setUndo({ l, ids })} onOpen={openById} />
+      <SharedLessonSheet lesson={selected} onClose={() => setSelected(null)} onChanged={() => { reloadSelected(); if (isStaff) sdata.reload() }}
+        onEdit={(l) => { setSelected(null); setEditing(l); setPresetStudent(null); setFormOpen(true) }}
+        onDeleted={(l, ids) => setUndo({ l, ids })} onOpen={openById} staffStudents={isStaff ? sdata.students : null} onOpenStudent={openStudent} />
       <SharedLessonForm open={formOpen} onClose={() => setFormOpen(false)} editing={editing} defaultDate={formDate} suggestions={suggestions}
-        onSaved={() => refresh()} />
+        onSaved={() => { refresh(); if (isStaff) sdata.reload() }} staffCtx={staffCtx} presetStudentId={presetStudent} />
+      {isStaff && (
+        <>
+          <StudentFormSheet open={quickAdd === 'ogrenci'} onClose={() => setQuickAdd(null)} instructors={sdata.instructors ?? []}
+            courses={[...new Set((sdata.students ?? []).flatMap((s) => s.course_names ?? []))]} onSaved={(s) => { sdata.reload(); nav({ kind: 'ogrenci', id: s.id }) }} />
+          <InstructorFormSheet open={quickAdd === 'egitmen'} onClose={() => setQuickAdd(null)} courses={[...new Set((sdata.instructors ?? []).flatMap((i) => i.course_names ?? []))]}
+            onSaved={(i) => { sdata.reload(); nav({ kind: 'egitmen', id: i.id }) }} />
+        </>
+      )}
       <NotificationPrompt mode="public" />
     </div>
   )
 }
 
 // ---------------------------------------------------------------------------
-function HomeTab({ data, error, onOpen, onAdd, onRetry, tick }: { data: SharedLesson[] | null; error: string | null; onOpen: (l: SharedLesson) => void; onAdd: () => void; onRetry: () => void; tick: number }) {
+function HomeTab({ data, error, onOpen, onAdd, onRetry, tick, staffSlot }: { data: SharedLesson[] | null; error: string | null; onOpen: (l: SharedLesson) => void; onAdd: () => void; onRetry: () => void; tick: number; staffSlot?: React.ReactNode }) {
   const today = dateKey()
   const now = Date.now()
   const todays = (data ?? []).filter((l) => dateKey(l.starts_at) === today)
@@ -275,11 +330,13 @@ function HomeTab({ data, error, onOpen, onAdd, onRetry, tick }: { data: SharedLe
           <Button size="sm" variant="secondary" icon={<RefreshCw className="size-4" />} onClick={onRetry}>Yeniden dene</Button>
         </Card>
       )}
-      <div className="mt-4 grid grid-cols-4 gap-2">
-        {[['Bugün', active.length], ['Tamamlanan', todays.filter((l) => l.status === 'tamamlandi').length], ['Devam eden', running.length], ['Bekleyen', pending.length]].map(([k, v]) => (
-          <Card key={k as string} className="p-3 text-center"><p className="text-xl font-bold tabular-nums">{v}</p><p className="text-[11px] text-slate-500">{k}</p></Card>
-        ))}
-      </div>
+      {staffSlot ?? (
+        <div className="mt-4 grid grid-cols-4 gap-2">
+          {[['Bugün', active.length], ['Tamamlanan', todays.filter((l) => l.status === 'tamamlandi').length], ['Devam eden', running.length], ['Bekleyen', pending.length]].map(([k, v]) => (
+            <Card key={k as string} className="p-3 text-center"><p className="text-xl font-bold tabular-nums">{v}</p><p className="text-[11px] text-slate-500">{k}</p></Card>
+          ))}
+        </div>
+      )}
       {next && (
         <button onClick={() => onOpen(next)} className="brand-gradient mt-4 w-full rounded-[1.5rem] p-5 text-left text-white shadow-lg shadow-brand-600/15">
           <p className="text-xs font-semibold uppercase tracking-wider opacity-80">Sıradaki ders · <Countdown to={next.starts_at} /></p>
@@ -398,9 +455,9 @@ function CalendarTab({ tick, onOpen, onAdd, onExport, onImport }: {
 }
 
 // ---------------------------------------------------------------------------
-function LessonsTab({ tick, onOpen }: { tick: number; onOpen: (l: SharedLesson) => void }) {
+function LessonsTab({ tick, onOpen, initial = 'yaklasan' }: { tick: number; onOpen: (l: SharedLesson) => void; initial?: 'yaklasan' | 'gecmis' }) {
   const today = dateKey()
-  const [which, setWhich] = useState<'yaklasan' | 'gecmis'>('yaklasan')
+  const [which, setWhich] = useState<'yaklasan' | 'gecmis'>(initial)
   const [q, setQ] = useState('')
   const range = which === 'yaklasan' ? [today, addDays(today, 60)] : [addDays(today, -60), addDays(today, 1)]
   const { data, error, loading } = useShared(range[0], range[1], tick)
@@ -508,35 +565,74 @@ function NotificationsTab({ tick, onOpenId }: { tick: number; onOpenId: (id: str
 }
 
 // ---------------------------------------------------------------------------
-function MenuTab({ onImport, onExport }: { onImport: () => void; onExport: () => void }) {
-  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent)
+const SCREEN_TITLE: Record<Screen['kind'], string> = {
+  ogrenciler: 'Öğrenciler', ogrenci: 'Öğrenci', egitmenler: 'Eğitmenler', egitmen: 'Eğitmen', raporlar: 'Raporlar', yoklama: 'Yoklama',
+}
+
+function BackTitle({ title, onBack }: { title: string; onBack: () => void }) {
+  return (
+    <div className="mb-3 flex items-center gap-2">
+      <button onClick={onBack} aria-label="Geri" className="-ml-2 grid size-11 place-items-center rounded-full text-slate-600 active:bg-slate-100"><ChevronLeft className="size-5" /></button>
+      <h1 className="text-2xl font-extrabold tracking-tight">{title}</h1>
+    </div>
+  )
+}
+
+function MenuTab({ isStaff, onNav, onTab }: { isStaff: boolean; onNav: (s: AppScreen) => void; onTab: (t: Tab, which?: 'yaklasan' | 'gecmis') => void }) {
+  const items: { label: string; icon: typeof Home; on: () => void; locked?: boolean }[] = [
+    { label: 'Öğrenciler', icon: Users, on: () => onNav({ kind: 'ogrenciler' }), locked: !isStaff },
+    { label: 'Eğitmenler', icon: GraduationCap, on: () => onNav({ kind: 'egitmenler' }), locked: !isStaff },
+    { label: 'Ders Programı', icon: CalendarDays, on: () => onTab('takvim') },
+    { label: 'Ders Geçmişi', icon: History, on: () => onTab('dersler', 'gecmis') },
+    { label: 'Yoklama', icon: ClipboardCheck, on: () => onNav({ kind: 'yoklama' }), locked: !isStaff },
+    { label: 'Raporlar', icon: BarChart3, on: () => onNav({ kind: 'raporlar' }), locked: !isStaff },
+    { label: 'Bildirimler', icon: Bell, on: () => onTab('bildirimler') },
+    { label: 'Ayarlar', icon: Settings, on: () => onNav({ kind: 'ayarlar' }) },
+  ]
   return (
     <div>
       <h1 className="text-2xl font-extrabold tracking-tight">Menü</h1>
-      <Card className="mt-4 p-4">
-        <p className="flex items-center gap-2 font-semibold"><Smartphone className="size-5 text-brand-600" />Telefona uygulama olarak kur</p>
-        <p className="mt-2 text-sm text-slate-600">
-          {ios ? 'Safari\'de alttaki Paylaş düğmesine dokunun, "Ana Ekrana Ekle"yi seçin. Sonra Mutu Akademi\'yi ana ekrandaki simgeden açın.'
-            : 'Chrome menüsünden (⋮) "Uygulamayı yükle" veya "Ana ekrana ekle"yi seçin.'}
-        </p>
+      <Card className="mt-4 divide-y divide-slate-100">
+        {items.map((it) => (
+          <button key={it.label} onClick={it.on} className="flex min-h-14 w-full items-center gap-3 px-4 text-left">
+            <it.icon className="size-5 text-brand-600" />
+            <span className="flex-1 font-semibold">{it.label}</span>
+            {it.locked && <Lock className="size-4 text-slate-300" aria-label="Yetkili cihaz gerekir" />}
+            <ChevronRight className="size-4 text-slate-300" />
+          </button>
+        ))}
       </Card>
-      <Card className="mt-3 p-4 text-sm text-slate-600">
-        <p className="flex items-center gap-2 font-semibold text-slate-900"><Lock className="size-5 text-brand-600" />Ortak ders alanı hakkında</p>
-        <p className="mt-2">Bu bağlantıyı açan herkes dersleri görebilir ve değiştirebilir. Kimlik doğrulaması olmadığı için kötü niyetli birinin değişiklik yapması tamamen engellenemez; bunu azaltmak için her işlem kaydedilir, silinen dersler geri alınabilir ve işlem sayısı sınırlıdır.</p>
-        <p className="mt-2">Bu alana telefon, veli, ödeme veya sağlık bilgisi yazmayın. Öğrenci kayıtları ve ödemeler ayrı, korumalı yönetim alanında tutulur.</p>
+      <p className="mt-6 text-center text-xs text-slate-400">MUTU AKADEMİ · sürüm {__APP_VERSION__}</p>
+    </div>
+  )
+}
+
+function SettingsScreen({ onBack, isStaff, onImport, onExport }: { onBack: () => void; isStaff: boolean; onImport: () => void; onExport: () => void }) {
+  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent)
+  const standalone = window.matchMedia?.('(display-mode: standalone)').matches || (navigator as Navigator & { standalone?: boolean }).standalone === true
+  return (
+    <div>
+      <BackTitle title="Ayarlar" onBack={onBack} />
+      <Card className="divide-y divide-slate-100">
+        <button onClick={onImport} className="flex min-h-14 w-full items-center gap-3 px-4 text-left">
+          <Upload className="size-5 text-brand-600" /><span className="flex-1"><b className="block">Program yükle</b><span className="text-sm text-slate-500">Excel veya CSV</span></span><ChevronRight className="size-4 text-slate-300" />
+        </button>
+        <button onClick={onExport} className="flex min-h-14 w-full items-center gap-3 px-4 text-left">
+          <Download className="size-5 text-brand-600" /><span className="flex-1"><b className="block">Programı dışa aktar</b><span className="text-sm text-slate-500">PDF, Excel, CSV</span></span><ChevronRight className="size-4 text-slate-300" />
+        </button>
       </Card>
-      <div className="mt-3 grid gap-2">
-        <button onClick={onImport} className="card flex min-h-16 items-center gap-3 p-4 text-left">
-          <Upload className="size-5 text-brand-600" />
-          <span className="flex-1 text-sm"><b className="block">Program yükle</b><span className="text-slate-500">Excel (.xlsx) veya CSV, önizlemeli</span></span>
-          <ChevronRight className="size-4 text-slate-300" />
-        </button>
-        <button onClick={onExport} className="card flex min-h-16 items-center gap-3 p-4 text-left">
-          <Download className="size-5 text-brand-600" />
-          <span className="flex-1 text-sm"><b className="block">Programı dışa aktar</b><span className="text-slate-500">Bu ve gelecek 4 hafta · PDF, Excel, CSV</span></span>
-          <ChevronRight className="size-4 text-slate-300" />
-        </button>
-      </div>
+      {!standalone && (
+        <Card className="mt-3 p-4">
+          <p className="flex items-center gap-2 font-semibold"><Smartphone className="size-5 text-brand-600" />Uygulama olarak kur</p>
+          <p className="mt-1 text-sm text-slate-600">{ios ? 'Safari\'de Paylaş → "Ana Ekrana Ekle".' : 'Tarayıcı menüsünden "Uygulamayı yükle".'}</p>
+        </Card>
+      )}
+      <Card className="mt-3 flex items-center gap-3 p-4 text-sm">
+        {isStaff ? <ShieldCheck className="size-5 text-emerald-600" /> : <Lock className="size-5 text-slate-400" />}
+        <span className="flex-1"><b className="block">{isStaff ? 'Yetkili cihaz' : 'Ortak program erişimi'}</b>
+          <span className="text-slate-500">{isStaff ? 'Öğrenci ve eğitmen bilgileri bu cihazda görünür.' : 'Öğrenci ve eğitmen bilgileri yalnızca yetkili cihazlarda görünür.'}</span></span>
+      </Card>
+      <p className="mt-3 px-1 text-xs text-slate-500">Ders notlarına telefon, veli, ödeme veya sağlık bilgisi yazmayın; ders programı bağlantıya sahip herkese açıktır.</p>
       <p className="mt-6 text-center text-xs text-slate-400">MUTU AKADEMİ · sürüm {__APP_VERSION__}</p>
     </div>
   )
