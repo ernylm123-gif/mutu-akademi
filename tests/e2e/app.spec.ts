@@ -6,6 +6,8 @@ const SUPABASE_URL = process.env.E2E_SUPABASE_URL
 const SUPABASE_KEY = process.env.E2E_SUPABASE_KEY // herkese açık (publishable) anahtar
 
 test.describe('herkese açık sayfalar', () => {
+  // iOS/iPadOS Safari'deki ilk açılış bildirim/kurulum rehberi bu testlerin konusu değil: ertelenmiş say
+  test.beforeEach(async ({ page }) => { await page.addInitScript(() => { try { localStorage.setItem('mutu-notif-prompt-later', String(Date.now())) } catch { /* yoksay */ } }) })
   test('ana adres girişsiz olarak doğrudan ortak ders programını açar', async ({ page }) => {
     const t0 = Date.now()
     await page.goto('/')
