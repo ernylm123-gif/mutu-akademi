@@ -12,7 +12,7 @@ import { StudentFormSheet, InstructorFormSheet } from '@/components/staff/StaffF
 
 export interface StaffCtx { students: StaffStudent[]; instructors: StaffInstructor[]; reload: () => void }
 
-const DURATIONS = [45, 60, 90, 120]
+const DURATIONS = [45, 60, 90, 120, 180]
 const toMin = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + m }
 const toHM = (m: number) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`
 

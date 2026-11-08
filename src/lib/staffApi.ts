@@ -48,6 +48,7 @@ export interface InstructorPeriod { planned: number; completed: number; taught: 
 export interface Credits { purchased: number; used: number; remaining: number }
 export interface StudentStats {
   month_start: string; month: Period; this_month: Period; week: Period; total: Period; credits: Credits
+  first: string | null; upcoming: StaffLesson[]; recent: StaffLesson[]
   next: { id: string; starts_at: string; ends_at: string; course_name: string } | null
   last: { id: string; starts_at: string; ends_at: string; course_name: string; attendance: SharedAttendance | null } | null
   by_course: { course: string; attended: number; attended_min: number }[]
@@ -97,7 +98,7 @@ const toInstructor = (i: RawInstructor): StaffInstructor => ({
 
 export interface StudentInput {
   name: string; courses: string[]; instructor_ids: string[]; package_name: string | null; default_duration: number; registered_at: string
-  weekly: WeeklyItem[]; is_active: boolean; total_credits: number
+  weekly: WeeklyItem[]; is_active: boolean; total_credits?: number
 }
 export interface InstructorInput { name: string; specialty: string | null; courses: string[]; work_days: number[]; work_start: string | null; work_end: string | null; is_active: boolean }
 

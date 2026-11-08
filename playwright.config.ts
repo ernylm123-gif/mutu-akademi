@@ -15,6 +15,7 @@ export default defineConfig({
     // iPhone (WebKit motoru) ve Android Chrome açılış senaryoları
     { name: 'iphone-webkit', testMatch: /(ios|shared)\.spec/, use: { ...devices['iPhone 13'] } },
     { name: 'android-chrome', testMatch: /ios\.spec/, use: { ...devices['Pixel 7'], channel: process.env.PW_CHANNEL || undefined } },
+    { name: 'ipad-webkit', testMatch: /(ios|app).spec/, use: { ...devices['iPad (gen 7)'] } },
   ],
   webServer: local
     ? { command: 'npm run build && npx vite preview --port 4173 --strictPort', url: 'http://localhost:4173', reuseExistingServer: true, timeout: 180_000 }

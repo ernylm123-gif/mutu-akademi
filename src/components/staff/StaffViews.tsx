@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import clsx from 'clsx'
 import {
   ArrowLeft, CalendarDays, ChevronLeft, ChevronRight, Clock, Download, GraduationCap, Pencil, Plus, Search, Upload,
-  UserPlus, Users, AlertTriangle, CheckCircle2, BarChart3, ClipboardCheck,
+  UserPlus, Users, CheckCircle2, BarChart3, ClipboardCheck,
 } from 'lucide-react'
 import { addDays, dateKey, formatDayShort, MONTHS, timeHM, WEEKDAYS } from '@/lib/time'
 import { matchesSearch } from '@/lib/format'
@@ -10,11 +10,12 @@ import { errorMessage } from '@/lib/errors'
 import { shared, type SharedAttendance } from '@/lib/sharedApi'
 import {
   staff, hm, exportTable, ATT_LABEL, ATT_ORDER, STATUS_LABEL,
-  type Dashboard, type InstructorStats, type Overview, type Package, type ReportRow, type StaffInstructor, type StaffLesson, type StaffStudent, type StudentStats,
+  type Dashboard, type InstructorStats, type Overview, type ReportRow, type StaffInstructor, type StaffLesson, type StaffStudent, type StudentStats,
 } from '@/lib/staffApi'
-import { Badge, Button, Card, EmptyState, Field, Input, PageLoader, Segmented, Select, Sheet } from '@/components/ui'
+import { Badge, Button, Card, EmptyState, Field, Input, PageLoader, Segmented, Select } from '@/components/ui'
 import { useToast } from '@/components/ui/Toast'
 import { StudentFormSheet, InstructorFormSheet } from './StaffForms'
+import { applyFilters, rangeOf, RANGE_LABEL, reportPdf, reportXlsx, STATUS_TEXT, statusText, summarize, TABLE_HEADERS, tableRow, type RangeKey } from '@/lib/reportCalc'
 
 export type Screen =
   | { kind: 'ogrenciler' } | { kind: 'ogrenci'; id: string } | { kind: 'egitmenler' } | { kind: 'egitmen'; id: string }
@@ -23,7 +24,6 @@ export type Screen =
 const monthKey = (d = dateKey()) => `${d.slice(0, 7)}-01`
 const shiftMonth = (m: string, n: number) => { const d = new Date(`${m}T12:00:00Z`); d.setUTCMonth(d.getUTCMonth() + n); return d.toISOString().slice(0, 7) + '-01' }
 const monthLabel = (m: string) => `${MONTHS[Number(m.slice(5, 7)) - 1]} ${m.slice(0, 4)}`
-const pct = (a: number, b: number) => (b > 0 ? `%${Math.round((a / b) * 100)}` : '—')
 const dmy = (iso: string) => dateKey(iso).split('-').reverse().join('.')
 
 /** Yetkili cihaz verileri: öğrenciler, eğitmenler ve liste özetleri (yayın geldikçe yenilenir) */
@@ -139,7 +139,7 @@ export function StaffDashboard({ tick, onNav, onAddStudent, onAddInstructor, onA
         <Tile label="Bu ay verilen eğitim" value={d ? hm(d.month_taught_min) : '…'} sub={d ? `${d.month_completed} ders tamamlandı` : undefined} />
         <Tile label="Bu ay ertelenen" value={d?.month_postponed ?? '…'} tone={d && d.month_postponed > 0 ? 'amber' : undefined} />
         <button onClick={() => onNav({ kind: 'yoklama' })} className="text-left"><Tile label="Yoklama bekleyen" value={d?.needs_attendance ?? '…'} tone={d && d.needs_attendance > 0 ? 'amber' : undefined} /></button>
-        <button onClick={() => onNav({ kind: 'ogrenciler' })} className="text-left"><Tile label="Hakkı azalan" value={d?.low_credit.length ?? '…'} tone={d && d.low_credit.length > 0 ? 'red' : undefined} sub={d ? `${d.low_credit_threshold} ders ve altı` : undefined} /></button>
+        <button onClick={() => onNav({ kind: 'raporlar' })} className="text-left"><Tile label="Bu ay tamamlanan" value={d?.month_completed ?? '…'} tone="green" /></button>
       </div>
       <div className="mt-3 grid grid-cols-4 gap-2">
         {[
@@ -153,16 +153,6 @@ export function StaffDashboard({ tick, onNav, onAddStudent, onAddInstructor, onA
           </button>
         ))}
       </div>
-      {d && d.low_credit.length > 0 && (
-        <Card className="mt-3 divide-y divide-slate-100 px-4">
-          <p className="flex items-center gap-1.5 py-2.5 text-xs font-bold uppercase tracking-wide text-red-700"><AlertTriangle className="size-3.5" />Ders hakkı azalan öğrenciler</p>
-          {d.low_credit.slice(0, 5).map((s) => (
-            <button key={s.id} onClick={() => onNav({ kind: 'ogrenci', id: s.id })} className="flex w-full items-center justify-between py-2.5 text-sm">
-              <span className="font-medium">{s.name}</span><Badge tone={s.remaining <= 0 ? 'red' : 'amber'}>{s.remaining} ders kaldı</Badge>
-            </button>
-          ))}
-        </Card>
-      )}
     </section>
   )
 }
@@ -171,16 +161,14 @@ export function StaffDashboard({ tick, onNav, onAddStudent, onAddInstructor, onA
 // Öğrenciler
 export function StudentsScreen({ data, onNav, onBack }: { data: StaffData; onNav: (s: Screen) => void; onBack?: () => void }) {
   const [q, setQ] = useState('')
-  const [filter, setFilter] = useState<'aktif' | 'pasif' | 'az' | 'tum'>('aktif')
+  const [filter, setFilter] = useState<'aktif' | 'pasif' | 'tum'>('aktif')
   const [course, setCourse] = useState('')
   const [instr, setInstr] = useState('')
   const [adding, setAdding] = useState(false)
   const courses = useMemo(() => [...new Set((data.students ?? []).flatMap((s) => s.course_names ?? []))].sort((a, b) => a.localeCompare(b, 'tr')), [data.students])
   const list = (data.students ?? []).filter((s) => {
-    const o = data.overview.get(s.id)
     if (filter === 'aktif' && !s.is_active) return false
     if (filter === 'pasif' && s.is_active) return false
-    if (filter === 'az' && !(s.is_active && o && o.purchased > 0 && o.remaining <= 2)) return false
     if (course && !(s.course_names ?? []).includes(course)) return false
     if (instr && !(s.instructor_ids ?? []).includes(instr)) return false
     return matchesSearch([s.full_name, ...(s.course_names ?? [])], q)
@@ -190,10 +178,10 @@ export function StudentsScreen({ data, onNav, onBack }: { data: StaffData; onNav
       <Header title="Öğrenciler" onBack={onBack} action={<Button size="sm" icon={<Plus className="size-4" />} onClick={() => setAdding(true)}>Öğrenci Ekle</Button>} />
       <div className="relative">
         <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
-        <Input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Ad, telefon veya kurs ara…" className="pl-10" />
+        <Input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Ad veya kurs ara…" className="pl-10" />
       </div>
       <div className="mt-2 flex flex-wrap gap-2">
-        <Segmented value={filter} onChange={setFilter} options={[{ value: 'aktif', label: 'Aktif' }, { value: 'az', label: 'Hakkı azalan' }, { value: 'pasif', label: 'Pasif' }, { value: 'tum', label: 'Tümü' }]} />
+        <Segmented value={filter} onChange={setFilter} options={[{ value: 'aktif', label: 'Aktif' }, { value: 'pasif', label: 'Pasif' }, { value: 'tum', label: 'Tümü' }]} />
         <Select aria-label="Kurs filtresi" value={course} onChange={(e) => setCourse(e.target.value)} className="h-11 w-auto text-sm"><option value="">Tüm kurslar</option>{courses.map((c) => <option key={c}>{c}</option>)}</Select>
         <Select aria-label="Eğitmen filtresi" value={instr} onChange={(e) => setInstr(e.target.value)} className="h-11 w-auto text-sm"><option value="">Tüm eğitmenler</option>{(data.instructors ?? []).map((i) => <option key={i.id} value={i.id}>{i.full_name}</option>)}</Select>
       </div>
@@ -213,7 +201,6 @@ export function StudentsScreen({ data, onNav, onBack }: { data: StaffData; onNav
                   {[(s.course_names ?? []).join(', '), o?.next_at ? `Sonraki: ${formatDayShort(dateKey(o.next_at))} ${timeHM(o.next_at)}` : null, o ? `Bu ay ${hm(o.month_min)}` : null].filter(Boolean).join(' · ') || '—'}
                 </span>
               </span>
-              {o && o.purchased > 0 && <Badge tone={o.remaining <= 0 ? 'red' : o.remaining <= 2 ? 'amber' : 'slate'}>{o.remaining} hak</Badge>}
             </button>
           )
         })}
@@ -224,7 +211,7 @@ export function StudentsScreen({ data, onNav, onBack }: { data: StaffData; onNav
   )
 }
 
-type StudentTab = 'genel' | 'program' | 'gecmis' | 'yoklama' | 'haklar' | 'istatistik'
+type StudentTab = 'genel' | 'dersler' | 'yoklama' | 'donem'
 export function StudentProfile({ id, data, tick, onBack, onOpenLesson, onAddLesson }: {
   id: string; data: StaffData; tick: number; onBack: () => void; onOpenLesson: (id: string) => void; onAddLesson: (studentId: string) => void
 }) {
@@ -241,75 +228,66 @@ export function StudentProfile({ id, data, tick, onBack, onOpenLesson, onAddLess
   }, [id, month, tick])
   if (!s) return <div><Header title="Öğrenci" onBack={onBack} />{data.students === null ? <PageLoader /> : <Card><EmptyState title="Öğrenci bulunamadı" /></Card>}</div>
   const iname = (iid: string | null) => data.instructors?.find((i) => i.id === iid)?.full_name ?? '—'
-  const now = Date.now()
   const m = st?.month
-  const exportMonth = async (k: 'pdf' | 'xlsx' | 'csv') => {
-    if (!st || !m) return
-    const summary: (string | number)[][] = [
-      ['Planlanan ders', m.planned], ['Katıldığı ders', m.attended], ['Aldığı eğitim', hm(m.attended_min)], ['Ertelenen', m.postponed],
-      ['İptal', m.cancelled], ['Devamsızlık', m.absent], ['İzinli', m.excused], ['Kalan ders hakkı', st.credits.remaining],
-    ]
-    const lessons = st.lessons.map((l) => [dmy(l.starts_at), `${timeHM(l.starts_at)}–${timeHM(l.ends_at)}`, l.course_name, l.instructor_name ?? '—', STATUS_LABEL[l.status], l.my_att ? ATT_LABEL[l.my_att] : '—'])
-    if (k === 'pdf') {
-      const { downloadPdf } = await import('@/lib/pdf')
-      await downloadPdf(`ogrenci-${s.public_label}-${month.slice(0, 7)}`, `Öğrenci: ${s.full_name}`, monthLabel(month), [
-        { title: 'Aylık özet', headers: ['Ölçüt', 'Değer'], rows: summary, widths: ['*', 120] },
-        { title: 'Dersler', headers: ['Tarih', 'Saat', 'Kurs', 'Eğitmen', 'Durum', 'Yoklama'], rows: lessons },
-      ])
-    } else await exportTable(k, `ogrenci-${s.public_label}-${month.slice(0, 7)}`, 'Öğrenci raporu', monthLabel(month),
-      ['Tarih', 'Saat', 'Kurs', 'Eğitmen', 'Durum', 'Yoklama'], [...lessons, [], ...summary.map((r) => [String(r[0]), String(r[1]), '', '', '', ''])])
-  }
+  const t = st?.total
   return (
     <div>
       <Header title={s.full_name} onBack={onBack} action={<Button size="sm" variant="secondary" icon={<Pencil className="size-4" />} onClick={() => setEditing(true)}>Düzenle</Button>} />
       <div className="-mx-4 mb-3 overflow-x-auto px-4">
         <div className="flex w-max gap-1.5">
-          {([['genel', 'Genel'], ['program', 'Ders Programı'], ['gecmis', 'Ders Geçmişi'], ['yoklama', 'Yoklama'], ['haklar', 'Ders Hakları'], ['istatistik', 'İstatistikler']] as [StudentTab, string][]).map(([k, label]) => (
+          {([['genel', 'Genel'], ['dersler', 'Dersler'], ['yoklama', 'Yoklama'], ['donem', 'Tarih aralığı']] as [StudentTab, string][]).map(([k, label]) => (
             <button key={k} onClick={() => setTab(k)} aria-pressed={tab === k} className={clsx('h-10 whitespace-nowrap rounded-full px-3.5 text-sm font-semibold', tab === k ? 'bg-slate-900 text-white' : 'bg-white text-slate-600 ring-1 ring-slate-200')}>{label}</button>
           ))}
         </div>
       </div>
-      {error && <p className="mb-3 rounded-xl bg-red-50 p-3 text-sm text-red-700">İstatistikler alınamadı: {error}</p>}
-      {(tab === 'gecmis' || tab === 'yoklama' || tab === 'istatistik' || tab === 'program') && <div className="mb-3 flex justify-end"><MonthNav month={month} onChange={setMonth} /></div>}
-      {!st ? <PageLoader /> : tab === 'genel' ? (
+      {error && <p className="mb-3 rounded-xl bg-red-50 p-3 text-sm text-red-700">Bilgiler alınamadı: {error}</p>}
+      {!st || !t ? (tab === 'donem' ? <StudentRange student={s} onOpenLesson={onOpenLesson} tick={tick} /> : <PageLoader />) : tab === 'genel' ? (
         <div className="space-y-3">
+          <section data-testid="toplam-ders-saati" className="brand-gradient rounded-[1.5rem] p-5 text-white shadow-lg shadow-brand-600/15">
+            <p className="text-xs font-semibold uppercase tracking-wider opacity-85">Toplam ders saati</p>
+            <p className="mt-1 text-4xl font-extrabold tabular-nums">{hm(t.attended_min)}</p>
+            <p className="mt-1 text-sm opacity-90">{t.attended} tamamlanan ders · {t.attended_min} dakika</p>
+          </section>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            <Tile label="Kalan ders hakkı" value={st.credits.remaining} sub={`${st.credits.purchased} alındı · ${st.credits.used} kullanıldı`} tone={st.credits.remaining <= 0 ? 'red' : st.credits.remaining <= 2 ? 'amber' : undefined} />
-            <Tile label="Toplam eğitim" value={hm(st.total.attended_min)} sub={`${st.total.attended} derse katıldı`} />
+            <Tile label="Tamamlanan ders" value={t.attended} sub={t.absent + t.excused > 0 ? `${t.absent} gelmedi · ${t.excused} izinli` : undefined} />
+            <Tile label="Planlanan ders" value={t.planned} />
+            <Tile label="İptal edilen" value={t.cancelled} />
+            <Tile label="Ertelenen" value={t.postponed} />
             <Tile label="Bu ay" value={hm(st.this_month.attended_min)} sub={`${st.this_month.attended} ders`} />
             <Tile label="Bu hafta" value={hm(st.week.attended_min)} sub={`${st.week.attended} ders`} />
-            <Tile label="Devam oranı" value={pct(st.total.attended, st.total.completed)} sub={`${st.total.absent} devamsızlık`} />
-            <Tile label="Planlanan ders" value={st.total.planned} sub={`${st.total.completed} tamamlandı`} />
-            <Tile label="Ertelenen" value={st.total.postponed} />
-            <Tile label="İptal" value={st.total.cancelled} />
+            <Tile label="İlk ders" value={st.first ? dmy(st.first) : '—'} />
+            <Tile label="Son tamamlanan" value={st.last ? dmy(st.last.starts_at) : '—'} />
           </div>
           <Card className="divide-y divide-slate-100 px-4 text-sm">
             <Row k="Sonraki ders" v={st.next ? <button className="font-semibold text-brand-700" onClick={() => onOpenLesson(st.next!.id)}>{formatDayShort(dateKey(st.next.starts_at))} {timeHM(st.next.starts_at)} · {st.next.course_name}</button> : '—'} />
-            <Row k="Son tamamlanan" v={st.last ? <button className="font-semibold" onClick={() => onOpenLesson(st.last!.id)}>{formatDayShort(dateKey(st.last.starts_at))} · {st.last.course_name}{st.last.attendance ? ` · ${ATT_LABEL[st.last.attendance]}` : ''}</button> : '—'} />
             <Row k="Kayıt tarihi" v={s.registered_at ? s.registered_at.split('-').reverse().join('.') : '—'} />
             <Row k="Kurslar" v={(s.course_names ?? []).join(', ') || '—'} />
             <Row k="Eğitmen" v={(s.instructor_ids ?? []).map(iname).join(', ') || '—'} />
-            <Row k="Ders paketi" v={s.package_name || '—'} />
-            <Row k="Varsayılan süre" v={`${s.default_duration} dk`} />
+            <Row k="Haftalık program" v={(s.weekly ?? []).length ? s.weekly.map((w) => `${WEEKDAYS[w.weekday - 1].slice(0, 3)} ${w.start}`).join(', ') : '—'} />
             <Row k="Durum" v={<Badge tone={s.is_active ? 'green' : 'slate'}>{s.is_active ? 'Aktif' : 'Pasif'}</Badge>} />
+          </Card>
+          {st.by_course.length > 1 && (
+            <Card className="divide-y divide-slate-100 px-4 text-sm">
+              <p className="py-2.5 text-xs font-bold uppercase tracking-wide text-slate-500">Kurs bazında ders saati</p>
+              {st.by_course.map((c) => <Row key={c.course} k={c.course} v={`${hm(c.attended_min)} · ${c.attended} ders`} />)}
+            </Card>
+          )}
+          <Card className="p-4">
+            <p className="mb-3 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-slate-500"><BarChart3 className="size-3.5" />Son 6 ay – ders saati</p>
+            <Bars data={st.history.map((h) => ({ label: MONTHS[Number(h.month.slice(5, 7)) - 1].slice(0, 3), value: h.attended_min, text: hm(h.attended_min) }))} />
           </Card>
           <Button block icon={<Plus className="size-4" />} onClick={() => onAddLesson(s.id)}>Bu öğrenciye ders ekle</Button>
         </div>
-      ) : tab === 'program' ? (
+      ) : tab === 'dersler' ? (
         <div className="space-y-3">
-          <Card className="p-4">
-            <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Haftalık program</p>
-            {(s.weekly ?? []).length === 0 ? <p className="text-sm text-slate-500">Haftalık düzenli ders tanımlı değil.</p> : (
-              <ul className="space-y-1 text-sm">{s.weekly.map((w, i) => <li key={i}><b>{WEEKDAYS[w.weekday - 1]}</b> {w.start} · {w.duration} dk</li>)}</ul>
-            )}
-          </Card>
-          <LessonList title={`${monthLabel(month)} – planlanan dersler`} lessons={st.lessons.filter((l) => l.status === 'planlandi')} onOpen={onOpenLesson} empty="Bu ay planlanan ders yok." />
+          <LessonList title="Gelecek dersler" lessons={st.upcoming ?? []} onOpen={onOpenLesson} empty="Planlanmış ders yok." />
+          <LessonList title="Geçmiş dersler (son 30)" lessons={st.recent ?? []} onOpen={onOpenLesson} empty="Henüz geçmiş ders yok."
+            extra={(l) => (l.status === 'tamamlandi' && l.my_att ? <Badge tone={attTone(l.my_att)}>{ATT_LABEL[l.my_att]}</Badge> : undefined)} />
           <Button block icon={<Plus className="size-4" />} onClick={() => onAddLesson(s.id)}>Ders ekle</Button>
         </div>
-      ) : tab === 'gecmis' ? (
-        <LessonList title={`${monthLabel(month)} – geçmiş dersler`} lessons={st.lessons.filter((l) => new Date(l.starts_at).getTime() < now || l.status !== 'planlandi').reverse()} onOpen={onOpenLesson} empty="Bu ay geçmiş ders yok." />
       ) : tab === 'yoklama' ? (
         <div className="space-y-3">
+          <div className="flex justify-end"><MonthNav month={month} onChange={setMonth} /></div>
           <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
             <Tile label="Katıldı" value={m!.attended - m!.late - m!.early} tone="green" /><Tile label="Gelmedi" value={m!.absent} tone={m!.absent ? 'red' : undefined} />
             <Tile label="İzinli" value={m!.excused} /><Tile label="Geç geldi" value={m!.late} /><Tile label="Erken ayrıldı" value={m!.early} />
@@ -317,34 +295,81 @@ export function StudentProfile({ id, data, tick, onBack, onOpenLesson, onAddLess
           <LessonList title="Yoklama kayıtları" lessons={st.lessons.filter((l) => l.status === 'tamamlandi')} onOpen={onOpenLesson} empty="Bu ay yoklaması alınmış ders yok."
             extra={(l) => <Badge tone={attTone(l.my_att)}>{l.my_att ? ATT_LABEL[l.my_att] : '—'}</Badge>} />
         </div>
-      ) : tab === 'haklar' ? (
-        <CreditsPanel student={s} credits={st.credits} tick={tick} onChanged={data.reload} />
       ) : (
-        <div className="space-y-3">
-          <Card className="p-4">
-            <p className="text-sm text-slate-500">Öğrenci: <b className="text-slate-900">{s.full_name}</b> · {monthLabel(month)}</p>
-            <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
-              <Tile label="Planlanan ders" value={m!.planned} /><Tile label="Katıldığı ders" value={m!.attended} />
-              <Tile label="Aldığı eğitim" value={hm(m!.attended_min)} sub={`Planlanan süre ${hm(m!.scheduled_min)}`} />
-              <Tile label="Ertelenen" value={m!.postponed} /><Tile label="Devamsızlık" value={m!.absent} tone={m!.absent ? 'red' : undefined} />
-              <Tile label="Kalan ders hakkı" value={st.credits.remaining} />
-            </div>
-            <p className="mt-2 text-xs text-slate-500">İptal edilen ve ertelenen dersler eğitim süresine eklenmez; ertelenen dersin yeni tarihi ayrı sayılır.</p>
-          </Card>
-          <Card className="p-4">
-            <p className="mb-3 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-slate-500"><BarChart3 className="size-3.5" />Son 6 ay – aldığı eğitim</p>
-            <Bars data={st.history.map((h) => ({ label: MONTHS[Number(h.month.slice(5, 7)) - 1].slice(0, 3), value: h.attended_min, text: hm(h.attended_min) }))} />
-          </Card>
-          <Card className="divide-y divide-slate-100 px-4 text-sm">
-            <p className="py-2.5 text-xs font-bold uppercase tracking-wide text-slate-500">Kurs bazında toplam eğitim</p>
-            {st.by_course.length === 0 ? <p className="py-3 text-slate-500">Henüz tamamlanan ders yok.</p>
-              : st.by_course.map((c) => <Row key={c.course} k={c.course} v={`${hm(c.attended_min)} · ${c.attended} ders`} />)}
-          </Card>
-          <ExportButtons onExport={exportMonth} />
-        </div>
+        <StudentRange student={s} onOpenLesson={onOpenLesson} tick={tick} />
       )}
       <StudentFormSheet open={editing} onClose={() => setEditing(false)} student={s} instructors={data.instructors ?? []}
         courses={[...new Set((data.students ?? []).flatMap((x) => x.course_names ?? []))]} onSaved={() => data.reload()} />
+    </div>
+  )
+}
+
+/** Hızlı tarih filtresi: Bu ay / Geçen ay / Son 3 ay / Özel aralık (İstanbul takvim günü) */
+function RangePicker({ value, from, to, onChange }: { value: RangeKey; from: string; to: string; onChange: (k: RangeKey, from: string, to: string) => void }) {
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap gap-1.5">
+        {(Object.keys(RANGE_LABEL) as RangeKey[]).map((k) => (
+          <button key={k} type="button" aria-pressed={value === k}
+            onClick={() => { if (k === 'ozel') onChange(k, from, to); else { const [a, b] = rangeOf(k); onChange(k, a, b) } }}
+            className={clsx('h-10 rounded-full px-3.5 text-sm font-semibold', value === k ? 'bg-brand-600 text-white' : 'bg-white text-slate-600 ring-1 ring-slate-200')}>{RANGE_LABEL[k]}</button>
+        ))}
+      </div>
+      {value === 'ozel' && (
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="Başlangıç tarihi"><Input type="date" value={from} max={to} onChange={(e) => e.target.value && onChange('ozel', e.target.value, to)} /></Field>
+          <Field label="Bitiş tarihi"><Input type="date" value={to} min={from} onChange={(e) => e.target.value && onChange('ozel', from, e.target.value)} /></Field>
+        </div>
+      )}
+      <p className="text-xs text-slate-500">{dmy2(from)} – {dmy2(to)}</p>
+    </div>
+  )
+}
+const dmy2 = (d: string) => d.split('-').reverse().join('.')
+
+function StudentRange({ student, onOpenLesson, tick }: { student: StaffStudent; onOpenLesson: (id: string) => void; tick: number }) {
+  const [key, setKey] = useState<RangeKey>('bu_ay')
+  const [[from, to], setRange] = useState(() => rangeOf('bu_ay'))
+  const [rows, setRows] = useState<ReportRow[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    let alive = true
+    setRows(null)
+    staff.report(from, to, { student: student.id }).then((r) => { if (alive) { setRows(r); setError(null) } }).catch((e) => { if (alive) { setError(errorMessage(e)); setRows([]) } })
+    return () => { alive = false }
+  }, [from, to, student.id, tick])
+  const sum = useMemo(() => summarize(rows ?? []), [rows])
+  const me = sum.byStudent.find((x) => x.key === student.id)
+  const doExport = async (k: 'pdf' | 'xlsx' | 'csv') => {
+    if (k === 'pdf') await reportPdf(`Öğrenci Ders Raporu – ${student.full_name}`, from, to, '', rows ?? [], sum)
+    else if (k === 'xlsx') await reportXlsx(`Öğrenci Ders Raporu – ${student.full_name}`, from, to, '', rows ?? [], sum)
+    else await exportTable('csv', `ogrenci-${student.full_name}-${from}-${to}`, 'Öğrenci ders raporu', '', TABLE_HEADERS, (rows ?? []).map(tableRow))
+  }
+  return (
+    <div className="space-y-3">
+      <Card className="p-4"><RangePicker value={key} from={from} to={to} onChange={(k, a, b) => { setKey(k); setRange([a, b]) }} /></Card>
+      {error && <p className="rounded-xl bg-red-50 p-3 text-sm text-red-700">Dersler alınamadı: {error}</p>}
+      {rows === null ? <PageLoader /> : (
+        <>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <Tile label="Ders saati" value={hm(me?.min ?? 0)} sub={`${me?.min ?? 0} dakika`} tone="green" />
+            <Tile label="Tamamlanan ders" value={me?.completed ?? 0} />
+            <Tile label="İptal edilen" value={sum.cancelled} />
+            <Tile label="Ertelenen" value={sum.postponed} />
+          </div>
+          <Card className="divide-y divide-slate-100 px-4">
+            <p className="py-2.5 text-xs font-bold uppercase tracking-wide text-slate-500">Bu aralıktaki dersler ({rows.length})</p>
+            {rows.length === 0 ? <p className="py-3 text-sm text-slate-500">Bu tarih aralığında ders yok.</p> : rows.map((r) => (
+              <button key={r.lesson_id} onClick={() => onOpenLesson(r.lesson_id)} className="flex w-full items-center gap-3 py-2.5 text-left text-sm">
+                <span className="w-24 shrink-0 tabular-nums"><b className="block">{dmy(r.starts_at)}</b><span className="text-xs text-slate-500">{timeHM(r.starts_at)}–{timeHM(r.ends_at)}</span></span>
+                <span className="min-w-0 flex-1 truncate">{r.course_name}<span className="block truncate text-xs text-slate-500">{r.instructor_name ?? '—'} · {r.scheduled_min} dk</span></span>
+                <Badge tone={r.status === 'tamamlandi' ? 'green' : r.status === 'iptal' ? 'red' : r.status === 'ertelendi' ? 'amber' : 'brand'}>{statusText(r)}</Badge>
+              </button>
+            ))}
+          </Card>
+          <ExportButtons onExport={doExport} />
+        </>
+      )}
     </div>
   )
 }
@@ -359,54 +384,6 @@ function LessonList({ title, lessons, onOpen, empty, extra }: { title: string; l
       <p className="py-2.5 text-xs font-bold uppercase tracking-wide text-slate-500">{title} ({lessons.length})</p>
       {lessons.length === 0 ? <p className="py-3 text-sm text-slate-500">{empty}</p> : lessons.map((l) => <LessonRow key={l.id} l={l} onOpen={onOpen} extra={extra?.(l)} />)}
     </Card>
-  )
-}
-
-function CreditsPanel({ student, credits, tick, onChanged }: { student: StaffStudent; credits: StudentStats['credits']; tick: number; onChanged: () => void }) {
-  const toast = useToast()
-  const [pkgs, setPkgs] = useState<Package[] | null>(null)
-  const [open, setOpen] = useState(false)
-  const [name, setName] = useState('Ders paketi')
-  const [count, setCount] = useState(8)
-  const [note, setNote] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [n, setN] = useState(0)
-  useEffect(() => { staff.packages(student.id).then(setPkgs).catch(() => setPkgs([])) }, [student.id, tick, n])
-  const add = async () => {
-    setBusy(true)
-    try { await staff.addPackage(student.id, name.trim() || 'Ders paketi', Math.round(count), note); toast.success('Ders paketi eklendi'); setOpen(false); setN((x) => x + 1); onChanged() }
-    catch (e) { toast.error(errorMessage(e)) } finally { setBusy(false) }
-  }
-  const voidPkg = async (p: Package) => {
-    try { await staff.voidPackage(p.id); toast.success('Paket iptal edildi'); setN((x) => x + 1); onChanged() } catch (e) { toast.error(errorMessage(e)) }
-  }
-  return (
-    <div className="space-y-3">
-      <div className="grid grid-cols-3 gap-2">
-        <Tile label="Satın alınan" value={credits.purchased} /><Tile label="Kullanılan" value={credits.used} />
-        <Tile label="Kalan" value={credits.remaining} tone={credits.remaining <= 0 ? 'red' : credits.remaining <= 2 ? 'amber' : 'green'} />
-      </div>
-      <p className="text-xs text-slate-500">Kullanılan hak, tamamlanan derslerin yoklamasından hesaplanır (katıldı, geç geldi, erken ayrıldı ve ayarlara göre gelmedi). İzinli dersler hak düşürmez; aynı ders iki kez düşülmez.</p>
-      <Button block icon={<Plus className="size-4" />} onClick={() => setOpen(true)}>Ders paketi ekle</Button>
-      <Card className="divide-y divide-slate-100 px-4 text-sm">
-        <p className="py-2.5 text-xs font-bold uppercase tracking-wide text-slate-500">Paket ve düzeltme geçmişi</p>
-        {pkgs === null ? <PageLoader rows={2} /> : pkgs.length === 0 ? <p className="py-3 text-slate-500">Kayıt yok.</p> : pkgs.map((p) => (
-          <div key={p.id} className="flex items-center justify-between gap-3 py-2.5">
-            <span className={clsx('min-w-0', p.is_void && 'text-slate-400 line-through')}><b>{p.name}</b><span className="block text-xs text-slate-500">{dmy(p.created_at)}{p.note ? ` · ${p.note}` : ''}</span></span>
-            <span className="flex items-center gap-2"><Badge tone={p.lesson_count > 0 ? 'green' : 'red'}>{p.lesson_count > 0 ? '+' : ''}{p.lesson_count}</Badge>
-              {!p.is_void && <button className="min-h-10 px-1 text-xs font-semibold text-slate-500" onClick={() => void voidPkg(p)}>İptal</button>}</span>
-          </div>
-        ))}
-      </Card>
-      <Sheet open={open} onClose={() => setOpen(false)} title="Ders paketi ekle"
-        footer={<div className="flex gap-2"><Button variant="secondary" block onClick={() => setOpen(false)}>Vazgeç</Button><Button block loading={busy} disabled={count < 1} onClick={() => void add()}>Ekle</Button></div>}>
-        <div className="grid gap-4">
-          <Field label="Paket adı"><Input value={name} maxLength={80} onChange={(e) => setName(e.target.value)} /></Field>
-          <Field label="Ders sayısı"><Input type="number" inputMode="numeric" min={1} max={500} value={count} onChange={(e) => setCount(Number(e.target.value))} /></Field>
-          <Field label="Not"><Input value={note} maxLength={200} onChange={(e) => setNote(e.target.value)} /></Field>
-        </div>
-      </Sheet>
-    </div>
   )
 }
 
@@ -542,96 +519,89 @@ export function InstructorProfile({ id, data, tick, onBack, onOpenLesson, onNav 
 }
 
 // ---------------------------------------------------------------------------
-// Raporlar
+// Ders Raporları: tarih aralığı + öğrenci/eğitmen/ders/tür/durum filtreleri, özet, kişi bazında saatler, PDF/Excel
 export function ReportsScreen({ data, onBack }: { data: StaffData; onBack: () => void }) {
-  const today = dateKey()
-  const [from, setFrom] = useState(monthKey())
-  const [to, setTo] = useState(addDays(shiftMonth(monthKey(), 1), -1))
+  const [key, setKey] = useState<RangeKey>('bu_ay')
+  const [[from, to], setRange] = useState(() => rangeOf('bu_ay'))
   const [student, setStudent] = useState('')
   const [instr, setInstr] = useState('')
   const [course, setCourse] = useState('')
-  const [rows, setRows] = useState<ReportRow[] | null>(null)
+  const [kind, setKind] = useState<'' | 'bireysel' | 'grup'>('')
+  const [status, setStatus] = useState('')
+  const [raw, setRaw] = useState<ReportRow[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   useEffect(() => {
-    setRows(null)
-    staff.report(from, to, { student: student || null, instructor: instr || null, course: course || null })
-      .then((r) => { setRows(r); setError(null) }).catch((e) => { setError(errorMessage(e)); setRows([]) })
-  }, [from, to, student, instr, course])
-  const courses = useMemo(() => [...new Set([...(data.students ?? []).flatMap((s) => s.course_names ?? []), ...(rows ?? []).map((r) => r.course_name)])].sort((a, b) => a.localeCompare(b, 'tr')), [data.students, rows])
-  const sum = useMemo(() => {
-    const rs = rows ?? []
-    const lessons = new Map<string, ReportRow>()
-    for (const r of rs) if (!lessons.has(r.lesson_id)) lessons.set(r.lesson_id, r)
-    const ls = [...lessons.values()]
-    const byStudent = new Map<string, { name: string; planned: number; attended: number; absent: number; min: number }>()
-    for (const r of rs) {
-      const k = r.student_id ?? `etiket:${r.student_name ?? '—'}`
-      const x = byStudent.get(k) ?? { name: r.student_name ?? '—', planned: 0, attended: 0, absent: 0, min: 0 }
-      if (r.status === 'planlandi' || r.status === 'tamamlandi') x.planned++
-      if (r.attended_min > 0) { x.attended++; x.min += r.attended_min }
-      if (r.status === 'tamamlandi' && r.attendance === 'katilmadi') x.absent++
-      byStudent.set(k, x)
-    }
-    const byInstr = new Map<string, { name: string; completed: number; min: number }>()
-    for (const l of ls) {
-      const k = l.instructor_id ?? `etiket:${l.instructor_name ?? '—'}`
-      const x = byInstr.get(k) ?? { name: l.instructor_name ?? '—', completed: 0, min: 0 }
-      if (l.status === 'tamamlandi') x.completed++
-      x.min += l.taught_min
-      byInstr.set(k, x)
-    }
-    return {
-      planned: ls.filter((l) => l.status === 'planlandi' || l.status === 'tamamlandi').length, completed: ls.filter((l) => l.status === 'tamamlandi').length,
-      postponed: ls.filter((l) => l.status === 'ertelendi').length, cancelled: ls.filter((l) => l.status === 'iptal').length,
-      scheduled: ls.filter((l) => l.status === 'planlandi' || l.status === 'tamamlandi').reduce((a, l) => a + l.scheduled_min, 0),
-      taught: ls.reduce((a, l) => a + l.taught_min, 0), attended: rs.reduce((a, r) => a + r.attended_min, 0),
-      byStudent: [...byStudent.values()].sort((a, b) => b.min - a.min), byInstr: [...byInstr.values()].sort((a, b) => b.min - a.min),
-    }
-  }, [rows])
-  const filterNote = [student && data.students?.find((s) => s.id === student)?.full_name, instr && data.instructors?.find((i) => i.id === instr)?.full_name, course].filter(Boolean).join(' · ')
+    let alive = true
+    setRaw(null)
+    staff.report(from, to, { student: student || null, instructor: instr || null })
+      .then((r) => { if (alive) { setRaw(r); setError(null) } }).catch((e) => { if (alive) { setError(errorMessage(e)); setRaw([]) } })
+    return () => { alive = false }
+  }, [from, to, student, instr])
+  const rows = useMemo(() => applyFilters(raw ?? [], { status: status || null, course: course || null, kind: kind || null }), [raw, status, course, kind])
+  const sum = useMemo(() => summarize(rows), [rows])
+  const courses = useMemo(() => [...new Set([...(data.students ?? []).flatMap((s) => s.course_names ?? []), ...(raw ?? []).map((r) => r.course_name)])].sort((a, b) => a.localeCompare(b, 'tr')), [data.students, raw])
+  const note = [student && data.students?.find((s) => s.id === student)?.full_name, instr && data.instructors?.find((i) => i.id === instr)?.full_name,
+    course, kind && (kind === 'grup' ? 'Grup dersleri' : 'Bireysel dersler'), status && STATUS_TEXT[status]].filter(Boolean).join(' · ')
   const doExport = async (k: 'pdf' | 'xlsx' | 'csv') => {
-    const headers = ['Tarih', 'Saat', 'Kurs', 'Öğrenci', 'Eğitmen', 'Durum', 'Yoklama', 'Planlanan (dk)', 'Verilen eğitim (dk)', 'Öğrenci katılım (dk)']
-    const data2 = (rows ?? []).map((r) => [dmy(r.starts_at), `${timeHM(r.starts_at)}–${timeHM(r.ends_at)}`, r.course_name, r.student_name ?? '—', r.instructor_name ?? '—',
-      STATUS_LABEL[r.status] ?? r.status, r.attendance ? ATT_LABEL[r.attendance] : '—', r.scheduled_min, r.taught_min, r.attended_min])
-    await exportTable(k, `rapor-${from}-${to}`, 'Ders raporu', `${from.split('-').reverse().join('.')} – ${to.split('-').reverse().join('.')}${filterNote ? ` · ${filterNote}` : ''}`, headers, data2)
+    if (k === 'pdf') await reportPdf('Ders Raporu', from, to, note, rows, sum)
+    else if (k === 'xlsx') await reportXlsx('Ders Raporu', from, to, note, rows, sum)
+    else await exportTable('csv', `ders-raporu-${from}-${to}`, 'Ders raporu', '', TABLE_HEADERS, rows.map(tableRow))
   }
+  const [showAll, setShowAll] = useState(false)
+  const shown = showAll ? rows : rows.slice(0, 100)
   return (
     <div>
-      <Header title="Raporlar" onBack={onBack} />
-      <Card className="grid grid-cols-2 gap-3 p-4 sm:grid-cols-3">
-        <Field label="Başlangıç"><Input type="date" value={from} max={to} onChange={(e) => e.target.value && setFrom(e.target.value)} /></Field>
-        <Field label="Bitiş"><Input type="date" value={to} min={from} onChange={(e) => e.target.value && setTo(e.target.value)} /></Field>
-        <div className="col-span-2 flex flex-wrap items-end gap-2 sm:col-span-1">
-          {[['Bu ay', monthKey(), addDays(shiftMonth(monthKey(), 1), -1)], ['Geçen ay', shiftMonth(monthKey(), -1), addDays(monthKey(), -1)], ['Son 7 gün', addDays(today, -6), today]].map(([l, a, b]) => (
-            <Button key={l} size="sm" variant="secondary" onClick={() => { setFrom(a); setTo(b) }}>{l}</Button>
-          ))}
+      <Header title="Ders Raporları" onBack={onBack} />
+      <Card className="space-y-3 p-4">
+        <RangePicker value={key} from={from} to={to} onChange={(k, a, b) => { setKey(k); setRange([a, b]) }} />
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+          <Field label="Öğrenci"><Select value={student} onChange={(e) => setStudent(e.target.value)}><option value="">Tümü</option>{(data.students ?? []).map((s) => <option key={s.id} value={s.id}>{s.full_name}</option>)}</Select></Field>
+          <Field label="Eğitmen"><Select value={instr} onChange={(e) => setInstr(e.target.value)}><option value="">Tümü</option>{(data.instructors ?? []).map((i) => <option key={i.id} value={i.id}>{i.full_name}</option>)}</Select></Field>
+          <Field label="Ders"><Select value={course} onChange={(e) => setCourse(e.target.value)}><option value="">Tümü</option>{courses.map((c) => <option key={c}>{c}</option>)}</Select></Field>
+          <Field label="Ders türü"><Select value={kind} onChange={(e) => setKind(e.target.value as typeof kind)}><option value="">Tümü</option><option value="bireysel">Bireysel</option><option value="grup">Grup</option></Select></Field>
+          <Field label="Durum"><Select value={status} onChange={(e) => setStatus(e.target.value)}><option value="">Tümü</option>{Object.entries(STATUS_TEXT).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</Select></Field>
         </div>
-        <Field label="Öğrenci"><Select value={student} onChange={(e) => setStudent(e.target.value)}><option value="">Tümü</option>{(data.students ?? []).map((s) => <option key={s.id} value={s.id}>{s.full_name}</option>)}</Select></Field>
-        <Field label="Eğitmen"><Select value={instr} onChange={(e) => setInstr(e.target.value)}><option value="">Tümü</option>{(data.instructors ?? []).map((i) => <option key={i.id} value={i.id}>{i.full_name}</option>)}</Select></Field>
-        <Field label="Kurs"><Select value={course} onChange={(e) => setCourse(e.target.value)}><option value="">Tümü</option>{courses.map((c) => <option key={c}>{c}</option>)}</Select></Field>
       </Card>
       {error && <p className="mt-3 rounded-xl bg-red-50 p-3 text-sm text-red-700">Rapor alınamadı: {error}</p>}
-      {rows === null ? <PageLoader /> : (
+      {raw === null ? <div className="mt-3"><PageLoader /></div> : (
         <div className="mt-3 space-y-3">
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            <Tile label="Planlanan ders" value={sum.planned} sub={`Planlanan süre ${hm(sum.scheduled)}`} /><Tile label="Tamamlanan" value={sum.completed} />
-            <Tile label="Ertelenen" value={sum.postponed} /><Tile label="İptal" value={sum.cancelled} />
-            <Tile label="Verilen eğitim" value={hm(sum.taught)} sub="Grup dersi bir kez" /><Tile label="Öğrenci katılım süresi" value={hm(sum.attended)} sub="Öğrenci başına toplam" />
-          </div>
+          <section data-testid="rapor-ozet" className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+            <Tile label="Planlanan" value={sum.planned} /><Tile label="Tamamlanan" value={sum.completed} tone="green" />
+            <Tile label="Ertelenen" value={sum.postponed} tone={sum.postponed ? 'amber' : undefined} /><Tile label="İptal edilen" value={sum.cancelled} tone={sum.cancelled ? 'red' : undefined} />
+            <Tile label="Tamamlanan süre" value={hm(sum.completedMin)} sub={`${sum.completedMin} dakika`} />
+          </section>
           <ExportButtons onExport={doExport} />
-          <Card className="overflow-x-auto px-4 text-sm">
-            <p className="py-2.5 text-xs font-bold uppercase tracking-wide text-slate-500">Öğrenci bazında</p>
-            {sum.byStudent.length === 0 ? <p className="pb-3 text-slate-500">Bu aralıkta ders yok.</p> : (
-              <table className="w-full min-w-[28rem] text-left"><thead className="text-xs text-slate-500"><tr><th className="py-1.5">Öğrenci</th><th>Planlanan</th><th>Katıldı</th><th>Gelmedi</th><th>Süre</th></tr></thead>
-                <tbody>{sum.byStudent.map((x) => <tr key={x.name} className="border-t border-slate-100"><td className="py-2 font-medium">{x.name}</td><td className="tabular-nums">{x.planned}</td><td className="tabular-nums">{x.attended}</td><td className="tabular-nums">{x.absent}</td><td className="tabular-nums">{hm(x.min)}</td></tr>)}</tbody></table>
+          <div className="grid gap-3 lg:grid-cols-2">
+            <Card className="px-4 text-sm">
+              <p className="py-2.5 text-xs font-bold uppercase tracking-wide text-slate-500">Öğrenci bazında ders saati</p>
+              {sum.byStudent.length === 0 ? <p className="pb-3 text-slate-500">Bu aralıkta ders yok.</p> : (
+                <table className="w-full text-left"><thead className="text-xs text-slate-500"><tr><th className="py-1.5 font-semibold">Öğrenci</th><th className="font-semibold">Tamamlanan</th><th className="text-right font-semibold">Süre</th></tr></thead>
+                  <tbody>{sum.byStudent.map((x) => <tr key={x.key} className="border-t border-slate-100"><td className="py-2 font-medium">{x.name}</td><td className="tabular-nums">{x.completed}</td><td className="text-right tabular-nums">{hm(x.min)}</td></tr>)}</tbody></table>
+              )}
+            </Card>
+            <Card className="px-4 text-sm">
+              <p className="py-2.5 text-xs font-bold uppercase tracking-wide text-slate-500">Eğitmen bazında ders saati</p>
+              {sum.byInstructor.length === 0 ? <p className="pb-3 text-slate-500">Bu aralıkta ders yok.</p> : (
+                <table className="w-full text-left"><thead className="text-xs text-slate-500"><tr><th className="py-1.5 font-semibold">Eğitmen</th><th className="font-semibold">Tamamlanan</th><th className="text-right font-semibold">Süre</th></tr></thead>
+                  <tbody>{sum.byInstructor.map((x) => <tr key={x.key} className="border-t border-slate-100"><td className="py-2 font-medium">{x.name}</td><td className="tabular-nums">{x.completed}</td><td className="text-right tabular-nums">{hm(x.min)}</td></tr>)}</tbody></table>
+              )}
+            </Card>
+          </div>
+          <Card className="px-4 text-sm">
+            <p className="py-2.5 text-xs font-bold uppercase tracking-wide text-slate-500">Dersler ({rows.length})</p>
+            {rows.length === 0 ? <p className="pb-3 text-slate-500">Seçilen aralıkta ders yok.</p> : (
+              <div className="-mx-4 overflow-x-auto px-4">
+                <table data-testid="rapor-tablo" className="w-full min-w-[40rem] text-left">
+                  <thead className="text-xs text-slate-500"><tr>{TABLE_HEADERS.map((h) => <th key={h} className="py-1.5 pr-2 font-semibold">{h}</th>)}</tr></thead>
+                  <tbody>{shown.map((r) => (
+                    <tr key={`${r.lesson_id}-${r.student_id ?? ''}`} className="border-t border-slate-100">
+                      {tableRow(r).map((c, i) => <td key={i} className={clsx('py-2 pr-2', i >= 4 && i <= 6 && 'tabular-nums whitespace-nowrap')}>{c}</td>)}
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
             )}
-          </Card>
-          <Card className="overflow-x-auto px-4 text-sm">
-            <p className="py-2.5 text-xs font-bold uppercase tracking-wide text-slate-500">Eğitmen bazında</p>
-            {sum.byInstr.length === 0 ? <p className="pb-3 text-slate-500">Bu aralıkta ders yok.</p> : (
-              <table className="w-full min-w-[22rem] text-left"><thead className="text-xs text-slate-500"><tr><th className="py-1.5">Eğitmen</th><th>Tamamlanan</th><th>Verilen eğitim</th></tr></thead>
-                <tbody>{sum.byInstr.map((x) => <tr key={x.name} className="border-t border-slate-100"><td className="py-2 font-medium">{x.name}</td><td className="tabular-nums">{x.completed}</td><td className="tabular-nums">{hm(x.min)}</td></tr>)}</tbody></table>
-            )}
+            {rows.length > shown.length && <button className="min-h-11 w-full text-sm font-semibold text-brand-700" onClick={() => setShowAll(true)}>Tümünü göster ({rows.length})</button>}
           </Card>
         </div>
       )}

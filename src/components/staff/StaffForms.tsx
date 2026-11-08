@@ -9,19 +9,19 @@ import { useToast } from '@/components/ui/Toast'
 
 const toggle = <T,>(xs: T[], x: T) => (xs.includes(x) ? xs.filter((y) => y !== x) : [...xs, x])
 const splitList = (s: string) => [...new Set(s.split(/[,;\n]+/).map((x) => x.trim()).filter(Boolean))].slice(0, 20)
-const DURS = [30, 40, 45, 50, 60, 75, 90, 120]
+const DURS = [30, 40, 45, 50, 60, 75, 90, 120, 180]
 
 function PrivacyNote() {
   return <p className="flex gap-2 rounded-xl bg-amber-50 p-2.5 text-xs text-amber-800 sm:col-span-2"><ShieldAlert className="size-4 shrink-0" />Bu bilgiler bağlantıya sahip herkesçe görülebilir. Telefon, veli, ödeme veya sağlık bilgisi yazmayın.</p>
 }
 
-/** Öğrenci kaydı – yalnızca hassas olmayan bilgiler (ad, kurs, eğitmen, ders hakkı, haftalık program) */
+/** Öğrenci kaydı – yalnızca hassas olmayan bilgiler (ad, kurs, eğitmen, haftalık program); ders saati sınırı yok */
 export function StudentFormSheet({ open, onClose, student, instructors, courses, onSaved, quick, initialName }: {
   open: boolean; onClose: () => void; student?: StaffStudent | null; instructors: StaffInstructor[]; courses: string[]
   onSaved: (s: StaffStudent) => void; quick?: boolean; initialName?: string
 }) {
   const toast = useToast()
-  const blank = () => ({ name: initialName ?? '', registered_at: dateKey(), instructor_ids: [] as string[], package_name: '', total: 8, duration: 60, is_active: true })
+  const blank = () => ({ name: initialName ?? '', registered_at: dateKey(), instructor_ids: [] as string[], duration: 60, is_active: true })
   const [v, setV] = useState(blank)
   const [courseText, setCourseText] = useState('')
   const [slots, setSlots] = useState<WeeklyItem[]>([])
@@ -33,24 +33,24 @@ export function StudentFormSheet({ open, onClose, student, instructors, courses,
     if (!open) return
     setError(null); setDirty(false)
     if (student) {
-      setV({ name: student.full_name, registered_at: student.registered_at, instructor_ids: student.instructor_ids ?? [], package_name: student.package_name ?? '',
-        total: student.total_lessons, duration: student.default_duration, is_active: student.is_active })
+      setV({ name: student.full_name, registered_at: student.registered_at, instructor_ids: student.instructor_ids ?? [], duration: student.default_duration, is_active: student.is_active })
       setCourseText((student.course_names ?? []).join(', '))
       setSlots((student.weekly ?? []).map((w) => ({ ...w })))
     } else { setV(blank()); setCourseText(''); setSlots([]) }
   }, [open, student]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const set = (p: Partial<typeof v>) => { setV((x) => ({ ...x, ...p })); setDirty(true); setError(null) }
-  const invalid = v.name.trim().length < 2 ? 'Öğrenci adını yazın.' : v.total < 0 ? 'Ders hakkı negatif olamaz.' : null
+  const invalid = v.name.trim().length < 2 ? 'Öğrenci adını yazın.' : null
 
   const save = async () => {
     if (invalid || busy) return
     setBusy(true); setError(null)
     try {
       const s = await staff.saveStudent({
-        name: v.name.trim(), courses: splitList(courseText), instructor_ids: v.instructor_ids, package_name: v.package_name.trim() || null,
+        // Ders hakkı/paket sınırı yok: eski paket bilgisi düzenlemede olduğu gibi korunur, hak hareketi oluşturulmaz
+        name: v.name.trim(), courses: splitList(courseText), instructor_ids: v.instructor_ids, package_name: student?.package_name ?? null,
         default_duration: v.duration, registered_at: v.registered_at || dateKey(), weekly: slots.filter((x) => /^\d\d:\d\d$/.test(x.start)),
-        is_active: v.is_active, total_credits: Math.round(Number(v.total) || 0),
+        is_active: v.is_active,
       }, student)
       toast.success(student ? 'Öğrenci güncellendi' : 'Öğrenci eklendi')
       setDirty(false)
@@ -92,10 +92,6 @@ export function StudentFormSheet({ open, onClose, student, instructors, courses,
             </div>
           )}
         </div>
-        <Field label="Ders paketi"><Input value={v.package_name} maxLength={80} onChange={(e) => set({ package_name: e.target.value })} placeholder="Ör. 8 derslik paket" /></Field>
-        <Field label="Toplam ders hakkı" hint={student ? 'Değişiklik ders hakları geçmişine düzeltme olarak eklenir.' : 'Başlangıç paketi olarak kaydedilir.'}>
-          <Input type="number" inputMode="numeric" min={0} value={v.total} onChange={(e) => set({ total: Number(e.target.value) })} />
-        </Field>
         <Field label="Varsayılan ders süresi">
           <Select value={v.duration} onChange={(e) => set({ duration: Number(e.target.value) })}>{DURS.map((d) => <option key={d} value={d}>{d} dakika</option>)}</Select>
         </Field>
